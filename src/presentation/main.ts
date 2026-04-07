@@ -1,8 +1,9 @@
 /**
  * Main — Presentation Layer (Point d entree)
  *
- * Bootstrap complet : scene, plateau, pions, des, batiments,
- * connexion EventBus → visuel, et demarrage de la partie.
+ * Bootstrap complet Phase 6 : scene, plateau, pions, des, batiments,
+ * HUD, action panel, notifications, affichage cartes.
+ * Controles clavier conserves en parallele des boutons.
  */
 
 import { SceneManager } from './scene-manager';
@@ -10,6 +11,10 @@ import { PawnController } from './pawns/pawn-controller';
 import { DiceRenderer } from './dice/dice-renderer';
 import { BuildingManager } from './buildings/building-manager';
 import { SquareHighlight } from './board/square-highlight';
+import { HudOverlay } from './ui/hud-overlay';
+import { ActionPanel } from './ui/action-panel';
+import { NotificationSystem } from './ui/notification';
+import { CardDisplay } from './ui/card-display';
 import { AssetLoader } from '@infrastructure/asset-loader';
 import { EventBus } from '@infrastructure/event-bus';
 import { Logger } from '@infrastructure/logger';
@@ -51,12 +56,12 @@ async function main(): Promise<void> {
   const assetLoader = new AssetLoader(sceneManager.getScene());
   await assetLoader.loadAll({
     onProgress: (progress, status) => {
-      updateSplash(10 + progress * 0.3, status);
+      updateSplash(10 + progress * 0.25, status);
     },
   });
 
   // 3. Initialiser la scene (eclairage, camera, plateau)
-  updateSplash(45, 'Construction du plateau 3D...');
+  updateSplash(40, 'Construction du plateau 3D...');
   await sceneManager.initialize();
 
   const scene = sceneManager.getScene();
@@ -66,13 +71,13 @@ async function main(): Promise<void> {
   const eventBus = new EventBus();
 
   // 5. Des
-  updateSplash(55, 'Creation des des...');
+  updateSplash(50, 'Creation des des...');
   const diceRenderer = new DiceRenderer(scene, eventBus);
   diceRenderer.setup();
   diceRenderer.connectEvents();
 
   // 6. Batiments
-  updateSplash(65, 'Preparation des batiments...');
+  updateSplash(55, 'Preparation des batiments...');
   const buildingManager = new BuildingManager(scene, eventBus, boardBuilder);
   buildingManager.setup();
   buildingManager.connectEvents();
@@ -81,23 +86,59 @@ async function main(): Promise<void> {
   const squareHighlight = new SquareHighlight(scene);
 
   // 8. Creer les joueurs
-  updateSplash(75, 'Preparation des joueurs...');
+  updateSplash(60, 'Preparation des joueurs...');
   const players = [
     createHumanPlayer('Vous', 0),
     createAIPlayer('Bot Alice', 1),
   ];
 
   // 9. Pions
-  updateSplash(80, 'Placement des pions...');
+  updateSplash(65, 'Placement des pions...');
   const pawnController = new PawnController(scene, eventBus, boardBuilder);
   pawnController.createPawns(players);
   pawnController.connectEvents();
 
   // 10. GameController
-  updateSplash(90, 'Initialisation du jeu...');
+  updateSplash(70, 'Initialisation du jeu...');
   const gameController = new GameController(players, eventBus);
 
-  // 11. Connecter le highlight de case aux tours
+  // 11. UI — HUD Overlay
+  updateSplash(75, 'Creation de l interface...');
+  const hud = new HudOverlay(eventBus, () => gameController.getState());
+  hud.setup();
+  hud.connectEvents();
+
+  // 12. UI — Action Panel
+  updateSplash(80, 'Panneau d actions...');
+  const actionPanel = new ActionPanel(
+    eventBus,
+    () => gameController.getState(),
+    {
+      rollDice: () => gameController.handleRollDice(),
+      buyProperty: () => gameController.handleBuyProperty(),
+      declineProperty: () => gameController.handleDeclineProperty(),
+      endTurn: () => gameController.handleEndTurn(),
+      payJailFine: () => gameController.handlePayJailFine(),
+      useJailCard: () => gameController.handleUseJailCard(),
+      buildHouse: (sq: number) => gameController.handleBuildHouse(sq),
+    },
+  );
+  actionPanel.setup();
+  actionPanel.connectEvents();
+
+  // 13. UI — Notifications
+  updateSplash(85, 'Notifications...');
+  const notifications = new NotificationSystem(eventBus);
+  notifications.setup();
+  notifications.connectEvents();
+
+  // 14. UI — Card Display
+  updateSplash(88, 'Affichage des cartes...');
+  const cardDisplay = new CardDisplay(eventBus);
+  cardDisplay.setup();
+  cardDisplay.connectEvents();
+
+  // 15. Connecter le highlight de case
   eventBus.on('pawn:moved', (data) => {
     const pos = boardBuilder.getSquarePosition(data.to);
     squareHighlight.show(pos);
@@ -111,93 +152,67 @@ async function main(): Promise<void> {
     }
   });
 
-  // 12. Connecter le bouton "Lancer les des" pour le joueur humain
-  setupHumanControls(gameController, eventBus);
+  // 16. Controles clavier (en parallele des boutons UI)
+  setupKeyboardControls(gameController);
 
-  // 13. Log des evenements en dev
+  // 17. Log des evenements en dev
   setupEventLogging(eventBus);
 
-  // 14. References debug
+  // 18. References debug
   (window as Record<string, unknown>).__game = gameController;
   (window as Record<string, unknown>).__scene = sceneManager;
   (window as Record<string, unknown>).__bus = eventBus;
   (window as Record<string, unknown>).__pawns = pawnController;
   (window as Record<string, unknown>).__dice = diceRenderer;
 
-  // 15. Demarrer le rendu
-  updateSplash(100, 'Pret !');
+  // 19. Demarrer le rendu
+  updateSplash(95, 'Lancement...');
   sceneManager.startRenderLoop();
+
+  updateSplash(100, 'Pret !');
   hideSplash();
 
-  // 16. Demarrer la partie
+  // 20. Demarrer la partie
   gameController.startGame();
 
-  logger.info('Monopoly 3D demarre — Phase 5');
+  logger.info('Monopoly 3D demarre — Phase 6');
 }
 
-// ─── Controles humain (temporaire, sera remplace par UI Phase 6) ────
+// ─── Controles clavier ──────────────────────────────────────────────
 
-function setupHumanControls(controller: GameController, bus: EventBus): void {
-  // Clavier pour les actions du joueur humain
+function setupKeyboardControls(controller: GameController): void {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
+    // Ignorer si on est dans un input
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+
     const player = controller.getCurrentPlayer();
-    if (player.isAI) return; // L IA joue toute seule
+    if (player.isAI) return;
 
     switch (e.key) {
-      case ' ': // Espace = lancer les des
+      case ' ':
       case 'Enter':
+        e.preventDefault();
         controller.handleRollDice();
         break;
-
-      case 'b': // B = acheter
+      case 'b':
+      case 'B':
         controller.handleBuyProperty();
         break;
-
-      case 'n': // N = decliner
+      case 'n':
+      case 'N':
         controller.handleDeclineProperty();
         break;
-
-      case 'e': // E = fin de tour
+      case 'e':
+      case 'E':
         controller.handleEndTurn();
         break;
-
-      case 'p': // P = payer amende prison
+      case 'p':
+      case 'P':
         controller.handlePayJailFine();
         break;
-
-      case 'c': // C = carte sortie prison
+      case 'c':
+      case 'C':
         controller.handleUseJailCard();
-        break;
-    }
-  });
-
-  // Notification des controles
-  bus.on('turn:started', (data) => {
-    const player = controller.getState().players.find((p) => p.id === data.playerId);
-    if (player && !player.isAI) {
-      bus.emit('ui:notification', {
-        message: 'Votre tour ! [Espace] pour lancer les des',
-        level: 'info',
-      });
-    }
-  });
-
-  bus.on('ui:action:required', (data) => {
-    const player = controller.getState().players.find((p) => p.id === data.context.playerId);
-    if (!player || player.isAI) return;
-
-    switch (data.type) {
-      case 'buy-property':
-        bus.emit('ui:notification', {
-          message: `Acheter pour ${data.context.price}€ ? [B] Acheter / [N] Decliner`,
-          level: 'info',
-        });
-        break;
-      case 'end-turn':
-        bus.emit('ui:notification', {
-          message: '[E] Fin de tour',
-          level: 'info',
-        });
         break;
     }
   });
@@ -209,12 +224,12 @@ function setupEventLogging(bus: EventBus): void {
   const events = [
     'game:started', 'game:ended',
     'turn:started', 'turn:ended',
-    'dice:rolled', 'pawn:moved',
+    'dice:rolled', 'dice:animation:complete',
+    'pawn:moved',
     'property:bought', 'rent:paid',
     'card:drawn', 'building:placed',
     'player:jailed', 'player:released',
     'player:bankrupt', 'player:balance:changed',
-    'ui:notification',
   ] as const;
 
   for (const event of events) {

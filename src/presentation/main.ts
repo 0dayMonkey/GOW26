@@ -1,7 +1,8 @@
 /**
  * Main — Presentation Layer (Point d entree)
  *
- * Bootstrap complet avec PropertyCardOverlay pour les cartes animees.
+ * Bootstrap complet avec HoverCard3D pour les cartes 3D interactives au survol.
+ * Remplace CardDisplay et PropertyCardOverlay par un systeme unifie.
  */
 
 import { SceneManager } from './scene-manager';
@@ -12,8 +13,7 @@ import { SquareHighlight } from './board/square-highlight';
 import { HudOverlay } from './ui/hud-overlay';
 import { ActionPanel } from './ui/action-panel';
 import { NotificationSystem } from './ui/notification';
-import { CardDisplay } from './ui/card-display';
-import { PropertyCardOverlay } from './ui/property-card-overlay';
+import { HoverCard3D } from './ui/hover-card-3d';
 import { PropertyPanel } from './ui/property-panel';
 import { AssetLoader } from '@infrastructure/asset-loader';
 import { EventBus } from '@infrastructure/event-bus';
@@ -112,17 +112,11 @@ async function main(): Promise<void> {
   notifications.setup();
   notifications.connectEvents();
 
-  // Card Display (Chance/CC)
-  updateSplash(87, 'Cartes...');
-  const cardDisplay = new CardDisplay(eventBus);
-  cardDisplay.setup();
-  cardDisplay.connectEvents();
-
-  // Property Card Overlay (NOUVEAU — carte Monopoly animee)
-  updateSplash(89, 'Carte propriete...');
-  const propertyCard = new PropertyCardOverlay(eventBus, () => gameController.getState());
-  propertyCard.setup();
-  propertyCard.connectEvents();
+  // HoverCard3D — carte Monopoly 3D interactive au survol de la case du joueur
+  updateSplash(89, 'Carte 3D interactive...');
+  const hoverCard = new HoverCard3D(scene, boardBuilder, () => gameController.getState());
+  hoverCard.setup();
+  hoverCard.connectEvents(eventBus);
 
   // Property Panel (panneau de proprietes possedees)
   updateSplash(91, 'Panneau proprietes...');

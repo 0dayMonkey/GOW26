@@ -28,7 +28,7 @@ describe('EventBus', () => {
       expect(handler).toHaveBeenCalledWith({ values: [3, 4], isDouble: false });
     });
 
-    it('appelle plusieurs handlers dans l'ordre d'inscription', () => {
+    it('appelle plusieurs handlers dans l ordre d inscription', () => {
       const order: number[] = [];
       bus.on('turn:started', () => order.push(1));
       bus.on('turn:started', () => order.push(2));
@@ -39,7 +39,7 @@ describe('EventBus', () => {
       expect(order).toEqual([1, 2, 3]);
     });
 
-    it('n'appelle pas les handlers d'un autre événement', () => {
+    it('n appelle pas les handlers d un autre événement', () => {
       const handler = vi.fn();
       bus.on('turn:started', handler);
 
@@ -117,7 +117,7 @@ describe('EventBus', () => {
   // ─── off ─────────────────────────────────────────────────────────
 
   describe('off', () => {
-    it('supprime tous les handlers d'un événement', () => {
+    it('supprime tous les handlers d un événement', () => {
       const h1 = vi.fn();
       const h2 = vi.fn();
       bus.on('dice:rolled', h1);
@@ -193,7 +193,7 @@ describe('EventBus', () => {
       expect(history[0]!.event).toBe('turn:started');
     });
 
-    it('clearHistory vide l'historique', () => {
+    it('clearHistory vide l historique', () => {
       bus.emit('turn:started', { playerId: 'p1' });
       bus.clearHistory();
 
@@ -218,7 +218,7 @@ describe('EventBus', () => {
   // ─── Error isolation ─────────────────────────────────────────────
 
   describe('error isolation', () => {
-    it('un handler qui throw n'empêche pas les autres', () => {
+    it('un handler qui throw n empêche pas les autres', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const handler1 = vi.fn(() => {
         throw new Error('boom');

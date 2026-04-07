@@ -149,7 +149,7 @@ describe('Logger', () => {
   // ─── Fail-safe ───────────────────────────────────────────────────
 
   describe('fail-safe', () => {
-    it('ne crashe pas si l'output throw', () => {
+    it('ne crashe pas si l output throw', () => {
       Logger.setOutput(() => {
         throw new Error('output broken');
       });

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monopoly 3D — Games on Web 2026</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1a1a2e;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      #renderCanvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        outline: none;
+        touch-action: none;
+      }
+
+      #splash {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        transition: opacity 0.6s ease-out;
+      }
+
+      #splash.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #splash h1 {
+        color: #e8d5b7;
+        font-size: 2.5rem;
+        font-weight: 300;
+        letter-spacing: 0.3rem;
+        margin-bottom: 2rem;
+        text-transform: uppercase;
+      }
+
+      #splash .progress-bar {
+        width: 300px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+
+      #splash .progress-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #e8d5b7, #c9a96e);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+
+      #splash .status {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 0.85rem;
+        margin-top: 1rem;
+      }
+
+      /* HUD overlay container */
+      #game-ui {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      #game-ui > * {
+        pointer-events: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Splash screen de chargement -->
+    <div id="splash">
+      <h1>Monopoly 3D</h1>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="status" id="splashStatus">Initialisation…</div>
+    </div>
+
+    <!-- Canvas Babylon.js -->
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Conteneur UI DOM du jeu -->
+    <div id="game-ui"></div>
+
+    <!-- Point d'entrée -->
+    <script type="module" src="/src/presentation/main.ts"></script>
+  </body>
+</html>

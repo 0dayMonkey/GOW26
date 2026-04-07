@@ -1,18 +1,12 @@
 /**
  * EventBus — Infrastructure Layer
  *
- * Bus d'événements typé qui découple toutes les couches.
- * Chaque événement est défini dans GameEvents avec son payload exact.
- * Aucune dépendance externe.
- *
- * Usage :
- *   const bus = new EventBus();
- *   const unsub = bus.on('dice:rolled', (data) => { ... });
- *   bus.emit('dice:rolled', { values: [3, 4], isDouble: false });
- *   unsub(); // cleanup
+ * Bus d evenements type qui decouple toutes les couches.
+ * Chaque evenement est defini dans GameEvents avec son payload exact.
+ * Aucune dependance externe.
  */
 
-// ─── Types d'action UI ───────────────────────────────────────────────
+// ─── Types d action UI ───────────────────────────────────────────────
 
 export type ActionType =
   | 'roll-dice'
@@ -30,19 +24,21 @@ export interface ActionContext {
   readonly options?: readonly string[];
 }
 
-// ─── Catalogue complet des événements ────────────────────────────────
+// ─── Catalogue complet des evenements ────────────────────────────────
 
 export interface GameEvents {
   // Tour de jeu
   'turn:started': { readonly playerId: string };
   'turn:ended': { readonly playerId: string };
   'dice:rolled': { readonly values: [number, number]; readonly isDouble: boolean };
+  'dice:animation:complete': { readonly values: [number, number]; readonly isDouble: boolean };
   'pawn:moved': {
     readonly playerId: string;
     readonly from: number;
     readonly to: number;
     readonly steps: readonly number[];
   };
+  'pawn:animation:complete': { readonly playerId: string; readonly to: number };
 
   // Actions de jeu
   'property:landed': { readonly playerId: string; readonly squareIndex: number };
@@ -101,24 +97,23 @@ export class EventBus {
   }
 
   /**
-   * S'abonner à un événement. Retourne une fonction de désinscription.
+   * S abonner a un evenement. Retourne une fonction de desinscription.
    */
   on<T extends EventName>(event: T, handler: EventHandler<T>): Unsubscribe {
     return this.addHandler(event, handler, false);
   }
 
   /**
-   * S'abonner à un événement pour une seule émission.
+   * S abonner a un evenement pour une seule emission.
    */
   once<T extends EventName>(event: T, handler: EventHandler<T>): Unsubscribe {
     return this.addHandler(event, handler, true);
   }
 
   /**
-   * Émettre un événement avec son payload typé.
+   * Emettre un evenement avec son payload type.
    */
   emit<T extends EventName>(event: T, data: GameEvents[T]): void {
-    // Historique pour debug/replay
     this.history.push({ event, data, timestamp: Date.now() });
     if (this.history.length > this.maxHistory) {
       this.history.shift();
@@ -127,7 +122,6 @@ export class EventBus {
     const entries = this.listeners.get(event);
     if (!entries || entries.length === 0) return;
 
-    // Copie pour éviter les problèmes si un handler se désinscrit pendant l'itération
     const snapshot = [...entries];
 
     for (const entry of snapshot) {
@@ -144,7 +138,7 @@ export class EventBus {
   }
 
   /**
-   * Supprimer tous les handlers d'un événement, ou tous si aucun nom fourni.
+   * Supprimer tous les handlers d un evenement, ou tous si aucun nom fourni.
    */
   off<T extends EventName>(event?: T): void {
     if (event !== undefined) {
@@ -155,21 +149,21 @@ export class EventBus {
   }
 
   /**
-   * Nombre de handlers enregistrés pour un événement.
+   * Nombre de handlers enregistres pour un evenement.
    */
   listenerCount<T extends EventName>(event: T): number {
     return this.listeners.get(event)?.length ?? 0;
   }
 
   /**
-   * Historique des événements émis (pour debug).
+   * Historique des evenements emis (pour debug).
    */
   getHistory(): ReadonlyArray<{ event: EventName; data: unknown; timestamp: number }> {
     return this.history;
   }
 
   /**
-   * Vider l'historique.
+   * Vider l historique.
    */
   clearHistory(): void {
     this.history.length = 0;
@@ -183,7 +177,7 @@ export class EventBus {
     this.history.length = 0;
   }
 
-  // ─── Privé ───────────────────────────────────────────────────────
+  // ─── Prive ───────────────────────────────────────────────────────
 
   private addHandler<T extends EventName>(
     event: T,

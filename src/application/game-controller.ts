@@ -1,8 +1,8 @@
 /**
  * GameController — Application Layer
  *
- * Orchestrateur principal : relie TurnManager, CommandQueue,
- * EventBus, GameState et AIController.
+ * Orchestrateur principal : relie TurnManager, EventBus, GameState et AIController.
+ * Attend la fin des animations (dice:animation:complete) avant de continuer.
  * Aucun import Babylon.js.
  */
 
@@ -38,12 +38,22 @@ export class GameController {
   private readonly turnManager: TurnManager;
   private readonly aiController: AIController;
   private lastDice: DiceRoll | null = null;
+  private waitingForAnimation = false;
 
   constructor(players: Player[], eventBus: EventBus) {
     this.state = createGameState(players);
     this.eventBus = eventBus;
     this.turnManager = new TurnManager(this.state, eventBus);
     this.aiController = new AIController(this.state, eventBus, this);
+
+    // Ecouter la fin d animation des des pour continuer le tour
+    this.eventBus.on('dice:animation:complete', (data) => {
+      if (this.waitingForAnimation) {
+        this.waitingForAnimation = false;
+        this.continueAfterDiceAnimation();
+      }
+    });
+
     logger.info('Partie initialisee', { playerCount: players.length });
   }
 
@@ -61,7 +71,7 @@ export class GameController {
     return getCurrentPlayer(this.state);
   }
 
-  // ─── Démarrer la partie ────────────────────────────────────────
+  // ─── Demarrer la partie ────────────────────────────────────────
 
   startGame(): void {
     const playerIds = this.state.players.map((p) => p.id);
@@ -75,12 +85,17 @@ export class GameController {
   // ─── Actions du joueur ─────────────────────────────────────────
 
   /**
-   * Lancer les dés. Appelé par le joueur humain ou l IA.
+   * Lancer les des. Les des sont lances, l animation demarre,
+   * et on attend dice:animation:complete avant de deplacer le pion.
    */
   handleRollDice(): void {
     const player = this.getCurrentPlayer();
     if (this.turnManager.getPhase() !== TurnPhase.WAITING_FOR_ROLL) {
       logger.warn('Roll ignore: mauvaise phase', { phase: this.turnManager.getPhase() });
+      return;
+    }
+    if (this.waitingForAnimation) {
+      logger.warn('Roll ignore: animation en cours');
       return;
     }
 
@@ -89,10 +104,22 @@ export class GameController {
     this.lastDice = dice;
     this.state.lastDiceRoll = dice;
 
+    // Emettre dice:rolled → declenche l animation des des
+    // Le deplacement se fera dans continueAfterDiceAnimation()
+    this.waitingForAnimation = true;
     this.eventBus.emit('dice:rolled', {
       values: dice.values,
       isDouble: dice.isDouble,
     });
+  }
+
+  /**
+   * Appele quand l animation des des est terminee.
+   * C est ici que le pion se deplace et la case est resolue.
+   */
+  private continueAfterDiceAnimation(): void {
+    const player = this.getCurrentPlayer();
+    const dice = this.lastDice!;
 
     // En prison ?
     if (player.inJail) {
@@ -238,7 +265,6 @@ export class GameController {
     const player = this.getCurrentPlayer();
     const phase = this.turnManager.getPhase();
 
-    // Permettre END_TURN depuis ACTION ou BUILDING
     if (phase === TurnPhase.ACTION || phase === TurnPhase.BUILDING) {
       this.turnManager.endTurn();
     } else if (phase !== TurnPhase.END_TURN) {
@@ -293,7 +319,6 @@ export class GameController {
         });
       }
 
-      // Si libere par double, on se deplace
       if (dice.isDouble) {
         this.turnManager.startMoving();
         const moveResult = movePlayer(player, dice);
@@ -309,7 +334,6 @@ export class GameController {
       }
     }
 
-    // Toujours en prison ou libere sans deplacement → fin du tour
     this.turnManager.startMoving();
     this.turnManager.startAction();
     this.finishTurn();
@@ -324,7 +348,6 @@ export class GameController {
       case SquareType.UTILITY: {
         const owner = getPropertyOwner(this.state, player.position);
         if (!owner) {
-          // Proposer l achat
           this.eventBus.emit('ui:action:required', {
             type: 'buy-property',
             context: {
@@ -334,7 +357,6 @@ export class GameController {
             },
           });
         } else if (owner.ownerId !== player.id) {
-          // Payer le loyer
           this.payRent(player, owner);
           this.afterAction();
         } else {
@@ -379,7 +401,6 @@ export class GameController {
       }
 
       default:
-        // GO, JAIL (visite), FREE_PARKING → rien
         this.afterAction();
         break;
     }
@@ -437,7 +458,6 @@ export class GameController {
   }
 
   private afterAction(): void {
-    // Proposer la construction si possible, sinon fin de tour
     this.eventBus.emit('ui:action:required', {
       type: 'end-turn',
       context: { playerId: this.getCurrentPlayer().id },
@@ -448,7 +468,6 @@ export class GameController {
     if (this.turnManager.getPhase() === TurnPhase.ACTION) {
       this.turnManager.endTurn();
     } else if (this.turnManager.getPhase() !== TurnPhase.END_TURN) {
-      // Force le passage par les phases manquantes
       try { this.turnManager.startAction(); } catch { /* already past */ }
       try { this.turnManager.endTurn(); } catch { /* already there */ }
     }

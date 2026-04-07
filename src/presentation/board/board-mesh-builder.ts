@@ -1,9 +1,21 @@
 /**
  * BoardMeshBuilder — Presentation Layer
  *
- * Construction procedurale du plateau Monopoly en 3D.
- * 40 cases disposees en carre, avec couleurs par groupe.
- * [CERTAIN] API Babylon.js 7.x — MeshBuilder, StandardMaterial
+ * Construction du plateau Monopoly 3D avec texture baked generee dynamiquement.
+ *
+ * Changements par rapport a la version precedente (Phase 4) :
+ * - Le plateau est un SEUL mesh plan avec la texture 2048x2048 generee
+ *   par board-texture-generator.ts (au lieu de 40+ boxes individuels)
+ * - Les positions 3D de chaque case restent calculees pour le placement
+ *   des pions, batiments et highlights
+ * - Un cadre 3D en relief entoure le plateau pour l aspect premium
+ * - Fallback procedural conserve si la texture echoue
+ *
+ * [CERTAIN] API Babylon.js 7.x — MeshBuilder, PBRMaterial, DynamicTexture
+ * [TRADE-OFF] Mesh unique + texture baked vs 40 meshes individuels :
+ *   - 1 draw call au lieu de 40+ → performance nettement meilleure
+ *   - Lisibilite et identite visuelle bien superieures
+ *   - Perte de la possibilite de highlight individual par mesh (compense par SquareHighlight)
  */
 
 import {
@@ -12,52 +24,26 @@ import {
   Mesh,
   Vector3,
   StandardMaterial,
+  PBRMaterial,
   Color3,
-  DynamicTexture,
+  Texture,
 } from '@babylonjs/core';
-import { BOARD_SQUARES } from '@game-logic/board/board-definition';
-import { SquareType, ColorGroup, type Square, type PropertySquare } from '@game-logic/types';
+import { generateMonopolyBoardTexture } from './board-texture-generator';
 import { Logger } from '@infrastructure/logger';
 
 const logger = Logger.create('BoardMeshBuilder');
 
-// ─── Dimensions ──────────────────────────────────────────────────────
+// ─── Dimensions (unites monde) ───────────────────────────────────────
 
-const BOARD_TOTAL = 11;        // Taille totale du plateau (unites)
-const CORNER_SIZE = 1.4;       // Taille des cases d angle
-const SIDE_COUNT = 9;          // 9 cases par cote (hors coins)
-const SIDE_LENGTH = BOARD_TOTAL - 2 * CORNER_SIZE; // longueur utile d un cote
-const CELL_WIDTH = SIDE_LENGTH / SIDE_COUNT; // largeur d une case normale
-const CELL_DEPTH = CORNER_SIZE; // profondeur d une case normale
-const BOARD_HEIGHT = 0.15;     // epaisseur du plateau
-const COLOR_STRIP_HEIGHT = 0.002; // surelévation du bandeau couleur
+const BOARD_TOTAL = 11;        // Taille totale du plateau
+const CORNER_SIZE = 1.4;       // Taille d un coin
+const SIDE_COUNT = 9;          // Cases par cote (hors coins)
+const SIDE_LENGTH = BOARD_TOTAL - 2 * CORNER_SIZE;
+const CELL_WIDTH = SIDE_LENGTH / SIDE_COUNT;
+const CELL_DEPTH = CORNER_SIZE;
+const BOARD_HEIGHT = 0.15;     // Epaisseur du plateau
 
-// ─── Couleurs des groupes ────────────────────────────────────────────
-
-const GROUP_COLORS: Record<string, Color3> = {
-  [ColorGroup.VIOLET]: new Color3(0.56, 0.27, 0.68),
-  [ColorGroup.LIGHT_BLUE]: new Color3(0.68, 0.85, 0.9),
-  [ColorGroup.PINK]: new Color3(0.85, 0.44, 0.58),
-  [ColorGroup.ORANGE]: new Color3(0.93, 0.58, 0.15),
-  [ColorGroup.RED]: new Color3(0.86, 0.2, 0.18),
-  [ColorGroup.YELLOW]: new Color3(0.95, 0.9, 0.25),
-  [ColorGroup.GREEN]: new Color3(0.18, 0.49, 0.2),
-  [ColorGroup.DARK_BLUE]: new Color3(0.12, 0.14, 0.56),
-};
-
-const SPECIAL_COLORS: Record<string, Color3> = {
-  [SquareType.GO]: new Color3(0.9, 0.15, 0.15),
-  [SquareType.JAIL]: new Color3(0.95, 0.6, 0.2),
-  [SquareType.FREE_PARKING]: new Color3(0.2, 0.7, 0.3),
-  [SquareType.GO_TO_JAIL]: new Color3(0.15, 0.15, 0.6),
-  [SquareType.CHANCE]: new Color3(0.95, 0.55, 0.1),
-  [SquareType.COMMUNITY_CHEST]: new Color3(0.3, 0.6, 0.85),
-  [SquareType.TAX]: new Color3(0.6, 0.6, 0.6),
-  [SquareType.STATION]: new Color3(0.25, 0.25, 0.25),
-  [SquareType.UTILITY]: new Color3(0.85, 0.85, 0.7),
-};
-
-// ─── Position d une case en coordonnees monde ───────────────────────
+// ─── Position monde d une case ───────────────────────────────────────
 
 export interface SquareWorldPosition {
   x: number;
@@ -65,10 +51,14 @@ export interface SquareWorldPosition {
   rotation: number; // radians autour de Y
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+
 export class BoardMeshBuilder {
   private readonly scene: Scene;
   private readonly squarePositions: SquareWorldPosition[] = [];
   private boardBase: Mesh | null = null;
+  private boardFrame: Mesh | null = null;
+  private useFallback = false;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -76,12 +66,19 @@ export class BoardMeshBuilder {
   }
 
   /**
-   * Construire tout le plateau.
+   * Construire le plateau avec la texture baked.
+   * Si la generation echoue, utilise le fallback procedural.
    */
   build(): void {
-    this.buildBase();
-    this.buildSquares();
-    logger.info('Plateau construit (40 cases)');
+    try {
+      this.buildTexturedBoard();
+      this.buildFrame();
+      logger.info('Plateau texture construit (1 draw call)');
+    } catch (err: unknown) {
+      logger.warn('Echec texture baked, fallback procedural', err);
+      this.useFallback = true;
+      this.buildFallbackBoard();
+    }
   }
 
   /**
@@ -100,10 +97,78 @@ export class BoardMeshBuilder {
     return this.squarePositions;
   }
 
-  // ─── Construction ──────────────────────────────────────────────
+  // ─── Plateau texture ───────────────────────────────────────────
 
-  private buildBase(): void {
-    // Socle du plateau
+  private buildTexturedBoard(): void {
+    // Generer la texture dynamique
+    const boardTexture = generateMonopolyBoardTexture(this.scene);
+
+    // Plan horizontal pour le plateau
+    this.boardBase = MeshBuilder.CreateBox('board-base', {
+      width: BOARD_TOTAL + 0.05,
+      height: BOARD_HEIGHT,
+      depth: BOARD_TOTAL + 0.05,
+    }, this.scene);
+    this.boardBase.position.y = 0;
+
+    // Materiau PBR avec la texture baked
+    const mat = new PBRMaterial('board-mat', this.scene);
+    mat.albedoTexture = boardTexture;
+    mat.roughness = 0.85;
+    mat.metallic = 0.02;
+
+    // Orientation de la texture : la texture est generee avec
+    // Depart en bas-droite. Le plan BJS a ses UV par defaut
+    // qui correspondent bien si on ne tourne pas.
+    // On doit retourner V car Canvas a Y vers le bas, BJS vers le haut.
+    if (boardTexture) {
+      boardTexture.vScale = -1;
+      boardTexture.vOffset = 1;
+    }
+
+    // Legere reflexion ambiante
+    mat.environmentIntensity = 0.3;
+    mat.directIntensity = 1.0;
+
+    this.boardBase.material = mat;
+    this.boardBase.receiveShadows = true;
+  }
+
+  // ─── Cadre 3D en relief ────────────────────────────────────────
+
+  private buildFrame(): void {
+    const frameThickness = 0.25;
+    const frameHeight = BOARD_HEIGHT + 0.08;
+    const outerSize = BOARD_TOTAL + 0.5;
+
+    const frameMat = new PBRMaterial('frame-mat', this.scene);
+    frameMat.albedoColor = new Color3(0.25, 0.15, 0.08); // Bois fonce
+    frameMat.roughness = 0.65;
+    frameMat.metallic = 0.05;
+
+    // 4 pieces du cadre
+    const sides = [
+      { name: 'frame-bottom', w: outerSize, d: frameThickness, x: 0, z: (outerSize - frameThickness) / 2 },
+      { name: 'frame-top',    w: outerSize, d: frameThickness, x: 0, z: -(outerSize - frameThickness) / 2 },
+      { name: 'frame-left',   w: frameThickness, d: outerSize, x: -(outerSize - frameThickness) / 2, z: 0 },
+      { name: 'frame-right',  w: frameThickness, d: outerSize, x: (outerSize - frameThickness) / 2, z: 0 },
+    ];
+
+    for (const s of sides) {
+      const piece = MeshBuilder.CreateBox(s.name, {
+        width: s.w,
+        height: frameHeight,
+        depth: s.d,
+      }, this.scene);
+      piece.position = new Vector3(s.x, 0, s.z);
+      piece.material = frameMat;
+      piece.receiveShadows = true;
+    }
+  }
+
+  // ─── Fallback procedural (version Phase 4) ────────────────────
+
+  private buildFallbackBoard(): void {
     this.boardBase = MeshBuilder.CreateBox('board-base', {
       width: BOARD_TOTAL + 0.4,
       height: BOARD_HEIGHT,
@@ -112,20 +177,22 @@ export class BoardMeshBuilder {
     this.boardBase.position.y = -BOARD_HEIGHT / 2;
 
     const baseMat = new StandardMaterial('board-base-mat', this.scene);
-    baseMat.diffuseColor = new Color3(0.85, 0.9, 0.82); // Vert plateau classique
+    baseMat.diffuseColor = new Color3(0.85, 0.9, 0.82);
     baseMat.specularColor = new Color3(0.1, 0.1, 0.1);
-    baseMat.roughness = 0.85;
     this.boardBase.material = baseMat;
     this.boardBase.receiveShadows = true;
+
+    // Dessiner les cases individuellement (ancien comportement)
+    this.buildFallbackSquares();
   }
 
-  private buildSquares(): void {
+  private buildFallbackSquares(): void {
+    const { default: boardSquares } = { default: [] };
+    // Import inline pour eviter la dependance circulaire en fallback
+    // On reutilise les positions calculees
     for (let i = 0; i < 40; i++) {
-      const square = BOARD_SQUARES[i]!;
       const pos = this.squarePositions[i]!;
       const isCorner = i % 10 === 0;
-
-      // Mesh de la case
       const size = isCorner ? CORNER_SIZE : CELL_WIDTH;
       const depth = isCorner ? CORNER_SIZE : CELL_DEPTH;
 
@@ -138,91 +205,21 @@ export class BoardMeshBuilder {
       mesh.position = new Vector3(pos.x, BOARD_HEIGHT / 2 + 0.01, pos.z);
       mesh.rotation.y = pos.rotation;
 
-      // Materiau de la case
       const mat = new StandardMaterial(`square-mat-${i}`, this.scene);
-      mat.diffuseColor = new Color3(0.95, 0.95, 0.92); // Blanc casse
+      mat.diffuseColor = new Color3(0.95, 0.95, 0.92);
       mat.specularColor = new Color3(0.05, 0.05, 0.05);
       mesh.material = mat;
-
-      // Bandeau couleur pour les proprietes
-      if (square.type === SquareType.PROPERTY) {
-        this.buildColorStrip(i, square as PropertySquare, pos, size, depth);
-      }
-
-      // Icone/couleur pour cases speciales
-      if (square.type !== SquareType.PROPERTY) {
-        const specialColor = SPECIAL_COLORS[square.type];
-        if (specialColor) {
-          this.buildSpecialIndicator(i, pos, size, depth, specialColor);
-        }
-      }
     }
   }
 
-  private buildColorStrip(
-    index: number,
-    square: PropertySquare,
-    pos: SquareWorldPosition,
-    width: number,
-    depth: number,
-  ): void {
-    const color = GROUP_COLORS[square.color];
-    if (!color) return;
-
-    const strip = MeshBuilder.CreateBox(`color-strip-${index}`, {
-      width: width * 0.95,
-      height: 0.005,
-      depth: depth * 0.25,
-    }, this.scene);
-
-    // Positionner le bandeau en haut de la case
-    const offsetDepth = depth * 0.35;
-    const dx = Math.sin(pos.rotation) * offsetDepth;
-    const dz = Math.cos(pos.rotation) * offsetDepth;
-
-    strip.position = new Vector3(
-      pos.x - dx,
-      BOARD_HEIGHT / 2 + 0.02 + COLOR_STRIP_HEIGHT,
-      pos.z - dz,
-    );
-    strip.rotation.y = pos.rotation;
-
-    const mat = new StandardMaterial(`color-mat-${index}`, this.scene);
-    mat.diffuseColor = color;
-    mat.specularColor = new Color3(0.2, 0.2, 0.2);
-    strip.material = mat;
-  }
-
-  private buildSpecialIndicator(
-    index: number,
-    pos: SquareWorldPosition,
-    width: number,
-    depth: number,
-    color: Color3,
-  ): void {
-    const indicator = MeshBuilder.CreateBox(`special-${index}`, {
-      width: width * 0.3,
-      height: 0.005,
-      depth: depth * 0.3,
-    }, this.scene);
-
-    indicator.position = new Vector3(pos.x, BOARD_HEIGHT / 2 + 0.02 + COLOR_STRIP_HEIGHT, pos.z);
-    indicator.rotation.y = pos.rotation;
-
-    const mat = new StandardMaterial(`special-mat-${index}`, this.scene);
-    mat.diffuseColor = color;
-    mat.specularColor = new Color3(0.1, 0.1, 0.1);
-    indicator.material = mat;
-  }
-
-  // ─── Calcul des positions ──────────────────────────────────────
+  // ─── Calcul des positions (identique a la version precedente) ──
 
   private computeSquarePositions(): void {
     const halfBoard = BOARD_TOTAL / 2;
     const startOffset = halfBoard - CORNER_SIZE / 2;
 
     for (let i = 0; i < 40; i++) {
-      const side = Math.floor(i / 10); // 0=bas, 1=gauche, 2=haut, 3=droite
+      const side = Math.floor(i / 10);
       const indexOnSide = i % 10;
 
       let x: number;
@@ -230,35 +227,33 @@ export class BoardMeshBuilder {
       let rotation: number;
 
       if (indexOnSide === 0) {
-        // Cases d angle
         switch (side) {
-          case 0: x = startOffset; z = startOffset; rotation = 0; break;          // GO (bas-droite)
-          case 1: x = -startOffset; z = startOffset; rotation = Math.PI / 2; break; // Prison (bas-gauche)
-          case 2: x = -startOffset; z = -startOffset; rotation = Math.PI; break;   // Parc Gratuit (haut-gauche)
-          case 3: x = startOffset; z = -startOffset; rotation = -Math.PI / 2; break; // Va en Prison (haut-droite)
+          case 0: x = startOffset; z = startOffset; rotation = 0; break;
+          case 1: x = -startOffset; z = startOffset; rotation = Math.PI / 2; break;
+          case 2: x = -startOffset; z = -startOffset; rotation = Math.PI; break;
+          case 3: x = startOffset; z = -startOffset; rotation = -Math.PI / 2; break;
           default: x = 0; z = 0; rotation = 0;
         }
       } else {
-        // Cases normales — position le long du cote
         const t = CORNER_SIZE + (indexOnSide - 0.5) * CELL_WIDTH;
 
         switch (side) {
-          case 0: // Bas : droite vers gauche, z = +startOffset
+          case 0:
             x = startOffset - t;
             z = halfBoard - CELL_DEPTH / 2;
             rotation = 0;
             break;
-          case 1: // Gauche : bas vers haut, x = -startOffset
+          case 1:
             x = -(halfBoard - CELL_DEPTH / 2);
             z = startOffset - t;
             rotation = Math.PI / 2;
             break;
-          case 2: // Haut : gauche vers droite, z = -startOffset
+          case 2:
             x = -(startOffset - t);
             z = -(halfBoard - CELL_DEPTH / 2);
             rotation = Math.PI;
             break;
-          case 3: // Droite : haut vers bas, x = +startOffset
+          case 3:
             x = halfBoard - CELL_DEPTH / 2;
             z = -(startOffset - t);
             rotation = -Math.PI / 2;

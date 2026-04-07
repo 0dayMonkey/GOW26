@@ -1,9 +1,14 @@
 /**
  * Main — Presentation Layer (Point d entree)
  *
- * Bootstrap complet Phase 6 : scene, plateau, pions, des, batiments,
- * HUD, action panel, notifications, affichage cartes.
- * Controles clavier conserves en parallele des boutons.
+ * Bootstrap complet : scene, plateau, pions, des, batiments,
+ * HUD, action panel, notifications, carte display, property panel.
+ * Camera cinematique connectee aux evenements.
+ *
+ * Changements vs version precedente :
+ * - CameraController.connectEvents() pour les transitions automatiques
+ * - PropertyPanel pour les cartes de proprietes
+ * - Controle clavier T pour toggle proprietes
  */
 
 import { SceneManager } from './scene-manager';
@@ -15,6 +20,7 @@ import { HudOverlay } from './ui/hud-overlay';
 import { ActionPanel } from './ui/action-panel';
 import { NotificationSystem } from './ui/notification';
 import { CardDisplay } from './ui/card-display';
+import { PropertyPanel } from './ui/property-panel';
 import { AssetLoader } from '@infrastructure/asset-loader';
 import { EventBus } from '@infrastructure/event-bus';
 import { Logger } from '@infrastructure/logger';
@@ -52,7 +58,7 @@ async function main(): Promise<void> {
   const sceneManager = new SceneManager(canvas);
   updateSplash(10, 'Creation de la scene...');
 
-  // 2. Charger les assets
+  // 2. Assets
   const assetLoader = new AssetLoader(sceneManager.getScene());
   await assetLoader.loadAll({
     onProgress: (progress, status) => {
@@ -60,7 +66,7 @@ async function main(): Promise<void> {
     },
   });
 
-  // 3. Initialiser la scene (eclairage, camera, plateau)
+  // 3. Scene (eclairage, camera, plateau)
   updateSplash(40, 'Construction du plateau 3D...');
   await sceneManager.initialize();
 
@@ -85,7 +91,7 @@ async function main(): Promise<void> {
   // 7. Highlight de case
   const squareHighlight = new SquareHighlight(scene);
 
-  // 8. Creer les joueurs
+  // 8. Joueurs
   updateSplash(60, 'Preparation des joueurs...');
   const players = [
     createHumanPlayer('Vous', 0),
@@ -102,13 +108,18 @@ async function main(): Promise<void> {
   updateSplash(70, 'Initialisation du jeu...');
   const gameController = new GameController(players, eventBus);
 
-  // 11. UI — HUD Overlay
+  // 11. Camera cinematique — connectee aux evenements
+  updateSplash(72, 'Configuration de la camera...');
+  const cameraController = sceneManager.getCamera()!;
+  cameraController.connectEvents(eventBus, boardBuilder);
+
+  // 12. HUD Overlay
   updateSplash(75, 'Creation de l interface...');
   const hud = new HudOverlay(eventBus, () => gameController.getState());
   hud.setup();
   hud.connectEvents();
 
-  // 12. UI — Action Panel
+  // 13. Action Panel
   updateSplash(80, 'Panneau d actions...');
   const actionPanel = new ActionPanel(
     eventBus,
@@ -126,19 +137,25 @@ async function main(): Promise<void> {
   actionPanel.setup();
   actionPanel.connectEvents();
 
-  // 13. UI — Notifications
+  // 14. Notifications
   updateSplash(85, 'Notifications...');
   const notifications = new NotificationSystem(eventBus);
   notifications.setup();
   notifications.connectEvents();
 
-  // 14. UI — Card Display
+  // 15. Card Display
   updateSplash(88, 'Affichage des cartes...');
   const cardDisplay = new CardDisplay(eventBus);
   cardDisplay.setup();
   cardDisplay.connectEvents();
 
-  // 15. Connecter le highlight de case
+  // 16. Property Panel (NOUVEAU)
+  updateSplash(90, 'Panneau de proprietes...');
+  const propertyPanel = new PropertyPanel(eventBus, () => gameController.getState());
+  propertyPanel.setup();
+  propertyPanel.connectEvents();
+
+  // 17. Highlight de case — connecte aux evenements
   eventBus.on('pawn:moved', (data) => {
     const pos = boardBuilder.getSquarePosition(data.to);
     squareHighlight.show(pos);
@@ -152,37 +169,37 @@ async function main(): Promise<void> {
     }
   });
 
-  // 16. Controles clavier (en parallele des boutons UI)
+  // 18. Controles clavier
   setupKeyboardControls(gameController);
 
-  // 17. Log des evenements en dev
+  // 19. Event logging (dev)
   setupEventLogging(eventBus);
 
-  // 18. References debug
+  // 20. Debug refs
   (window as Record<string, unknown>).__game = gameController;
   (window as Record<string, unknown>).__scene = sceneManager;
   (window as Record<string, unknown>).__bus = eventBus;
   (window as Record<string, unknown>).__pawns = pawnController;
   (window as Record<string, unknown>).__dice = diceRenderer;
+  (window as Record<string, unknown>).__props = propertyPanel;
 
-  // 19. Demarrer le rendu
+  // 21. Render loop
   updateSplash(95, 'Lancement...');
   sceneManager.startRenderLoop();
 
   updateSplash(100, 'Pret !');
   hideSplash();
 
-  // 20. Demarrer la partie
+  // 22. Demarrer la partie
   gameController.startGame();
 
-  logger.info('Monopoly 3D demarre — Phase 6');
+  logger.info('Monopoly 3D demarre');
 }
 
 // ─── Controles clavier ──────────────────────────────────────────────
 
 function setupKeyboardControls(controller: GameController): void {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
-    // Ignorer si on est dans un input
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
     const player = controller.getCurrentPlayer();
@@ -214,6 +231,7 @@ function setupKeyboardControls(controller: GameController): void {
       case 'C':
         controller.handleUseJailCard();
         break;
+      // T est gere par PropertyPanel directement
     }
   });
 }

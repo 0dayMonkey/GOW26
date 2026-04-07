@@ -166,7 +166,7 @@ function drawCenter(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = '#C41E3A';
   ctx.font = `bold ${Math.round(TEX_SIZE * 0.065)}px Georgia, serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('MONOPOLY', 0, -20);
+  ctx.fillText('BUFFAPOLY', 0, -20);
   ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
   ctx.fillStyle = '#333';
   ctx.font = `${Math.round(TEX_SIZE * 0.02)}px Georgia, serif`;

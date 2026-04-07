@@ -1,14 +1,7 @@
 /**
  * Main — Presentation Layer (Point d entree)
  *
- * Bootstrap complet : scene, plateau, pions, des, batiments,
- * HUD, action panel, notifications, carte display, property panel.
- * Camera cinematique connectee aux evenements.
- *
- * Changements vs version precedente :
- * - CameraController.connectEvents() pour les transitions automatiques
- * - PropertyPanel pour les cartes de proprietes
- * - Controle clavier T pour toggle proprietes
+ * Bootstrap complet avec PropertyCardOverlay pour les cartes animees.
  */
 
 import { SceneManager } from './scene-manager';
@@ -20,6 +13,7 @@ import { HudOverlay } from './ui/hud-overlay';
 import { ActionPanel } from './ui/action-panel';
 import { NotificationSystem } from './ui/notification';
 import { CardDisplay } from './ui/card-display';
+import { PropertyCardOverlay } from './ui/property-card-overlay';
 import { PropertyPanel } from './ui/property-panel';
 import { AssetLoader } from '@infrastructure/asset-loader';
 import { EventBus } from '@infrastructure/event-bus';
@@ -28,8 +22,6 @@ import { GameController } from '@application/game-controller';
 import { createHumanPlayer, createAIPlayer } from '@game-logic/player/player-factory';
 
 const logger = Logger.create('Main');
-
-// ─── Splash screen ──────────────────────────────────────────────────
 
 function updateSplash(progress: number, status: string): void {
   const fill = document.getElementById('progressFill') as HTMLElement | null;
@@ -40,225 +32,153 @@ function updateSplash(progress: number, status: string): void {
 
 function hideSplash(): void {
   const splash = document.getElementById('splash');
-  if (splash) {
-    splash.classList.add('hidden');
-    setTimeout(() => splash.remove(), 600);
-  }
+  if (splash) { splash.classList.add('hidden'); setTimeout(() => splash.remove(), 600); }
 }
 
-// ─── Bootstrap ──────────────────────────────────────────────────────
-
 async function main(): Promise<void> {
-  updateSplash(5, 'Demarrage du moteur...');
-
+  updateSplash(5, 'Demarrage...');
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
-  if (!canvas) throw new Error('Canvas #renderCanvas introuvable');
+  if (!canvas) throw new Error('Canvas introuvable');
 
-  // 1. Scene Manager
   const sceneManager = new SceneManager(canvas);
-  updateSplash(10, 'Creation de la scene...');
+  updateSplash(10, 'Scene...');
 
-  // 2. Assets
   const assetLoader = new AssetLoader(sceneManager.getScene());
-  await assetLoader.loadAll({
-    onProgress: (progress, status) => {
-      updateSplash(10 + progress * 0.25, status);
-    },
-  });
+  await assetLoader.loadAll({ onProgress: (p, s) => updateSplash(10 + p * 0.25, s) });
 
-  // 3. Scene (eclairage, camera, plateau)
-  updateSplash(40, 'Construction du plateau 3D...');
+  updateSplash(40, 'Plateau 3D...');
   await sceneManager.initialize();
-
   const scene = sceneManager.getScene();
   const boardBuilder = sceneManager.getBoard()!;
-
-  // 4. EventBus
   const eventBus = new EventBus();
 
-  // 5. Des
-  updateSplash(50, 'Creation des des...');
+  // Des
+  updateSplash(50, 'Des...');
   const diceRenderer = new DiceRenderer(scene, eventBus);
   diceRenderer.setup();
   diceRenderer.connectEvents();
 
-  // 6. Batiments
-  updateSplash(55, 'Preparation des batiments...');
+  // Batiments
+  updateSplash(55, 'Batiments...');
   const buildingManager = new BuildingManager(scene, eventBus, boardBuilder);
   buildingManager.setup();
   buildingManager.connectEvents();
 
-  // 7. Highlight de case
+  // Highlight
   const squareHighlight = new SquareHighlight(scene);
 
-  // 8. Joueurs
-  updateSplash(60, 'Preparation des joueurs...');
-  const players = [
-    createHumanPlayer('Vous', 0),
-    createAIPlayer('Bot Alice', 1),
-  ];
+  // Joueurs
+  updateSplash(60, 'Joueurs...');
+  const players = [createHumanPlayer('Vous', 0), createAIPlayer('Bot Alice', 1)];
 
-  // 9. Pions
-  updateSplash(65, 'Placement des pions...');
+  // Pions
+  updateSplash(65, 'Pions...');
   const pawnController = new PawnController(scene, eventBus, boardBuilder);
   pawnController.createPawns(players);
   pawnController.connectEvents();
 
-  // 10. GameController
-  updateSplash(70, 'Initialisation du jeu...');
+  // GameController
+  updateSplash(70, 'Jeu...');
   const gameController = new GameController(players, eventBus);
 
-  // 11. Camera cinematique — connectee aux evenements
-  updateSplash(72, 'Configuration de la camera...');
+  // Camera
+  updateSplash(72, 'Camera...');
   const cameraController = sceneManager.getCamera()!;
   cameraController.connectEvents(eventBus, boardBuilder);
 
-  // 12. HUD Overlay
-  updateSplash(75, 'Creation de l interface...');
+  // HUD
+  updateSplash(75, 'Interface...');
   const hud = new HudOverlay(eventBus, () => gameController.getState());
   hud.setup();
   hud.connectEvents();
 
-  // 13. Action Panel
-  updateSplash(80, 'Panneau d actions...');
-  const actionPanel = new ActionPanel(
-    eventBus,
-    () => gameController.getState(),
-    {
-      rollDice: () => gameController.handleRollDice(),
-      buyProperty: () => gameController.handleBuyProperty(),
-      declineProperty: () => gameController.handleDeclineProperty(),
-      endTurn: () => gameController.handleEndTurn(),
-      payJailFine: () => gameController.handlePayJailFine(),
-      useJailCard: () => gameController.handleUseJailCard(),
-      buildHouse: (sq: number) => gameController.handleBuildHouse(sq),
-    },
-  );
+  // Action Panel
+  updateSplash(80, 'Actions...');
+  const actionPanel = new ActionPanel(eventBus, () => gameController.getState(), {
+    rollDice: () => gameController.handleRollDice(),
+    buyProperty: () => gameController.handleBuyProperty(),
+    declineProperty: () => gameController.handleDeclineProperty(),
+    endTurn: () => gameController.handleEndTurn(),
+    payJailFine: () => gameController.handlePayJailFine(),
+    useJailCard: () => gameController.handleUseJailCard(),
+    buildHouse: (sq: number) => gameController.handleBuildHouse(sq),
+  });
   actionPanel.setup();
   actionPanel.connectEvents();
 
-  // 14. Notifications
+  // Notifications
   updateSplash(85, 'Notifications...');
   const notifications = new NotificationSystem(eventBus);
   notifications.setup();
   notifications.connectEvents();
 
-  // 15. Card Display
-  updateSplash(88, 'Affichage des cartes...');
+  // Card Display (Chance/CC)
+  updateSplash(87, 'Cartes...');
   const cardDisplay = new CardDisplay(eventBus);
   cardDisplay.setup();
   cardDisplay.connectEvents();
 
-  // 16. Property Panel (NOUVEAU)
-  updateSplash(90, 'Panneau de proprietes...');
+  // Property Card Overlay (NOUVEAU — carte Monopoly animee)
+  updateSplash(89, 'Carte propriete...');
+  const propertyCard = new PropertyCardOverlay(eventBus, () => gameController.getState());
+  propertyCard.setup();
+  propertyCard.connectEvents();
+
+  // Property Panel (panneau de proprietes possedees)
+  updateSplash(91, 'Panneau proprietes...');
   const propertyPanel = new PropertyPanel(eventBus, () => gameController.getState());
   propertyPanel.setup();
   propertyPanel.connectEvents();
 
-  // 17. Highlight de case — connecte aux evenements
+  // Highlight case
   eventBus.on('pawn:moved', (data) => {
     const pos = boardBuilder.getSquarePosition(data.to);
     squareHighlight.show(pos);
   });
-
   eventBus.on('turn:started', (data) => {
     const player = gameController.getState().players.find((p) => p.id === data.playerId);
-    if (player) {
-      const pos = boardBuilder.getSquarePosition(player.position);
-      squareHighlight.show(pos);
-    }
+    if (player) squareHighlight.show(boardBuilder.getSquarePosition(player.position));
   });
 
-  // 18. Controles clavier
-  setupKeyboardControls(gameController);
+  // Clavier
+  setupKeyboard(gameController);
+  setupEventLog(eventBus);
 
-  // 19. Event logging (dev)
-  setupEventLogging(eventBus);
-
-  // 20. Debug refs
   (window as Record<string, unknown>).__game = gameController;
-  (window as Record<string, unknown>).__scene = sceneManager;
   (window as Record<string, unknown>).__bus = eventBus;
-  (window as Record<string, unknown>).__pawns = pawnController;
-  (window as Record<string, unknown>).__dice = diceRenderer;
-  (window as Record<string, unknown>).__props = propertyPanel;
 
-  // 21. Render loop
   updateSplash(95, 'Lancement...');
   sceneManager.startRenderLoop();
-
   updateSplash(100, 'Pret !');
   hideSplash();
-
-  // 22. Demarrer la partie
   gameController.startGame();
-
   logger.info('Monopoly 3D demarre');
 }
 
-// ─── Controles clavier ──────────────────────────────────────────────
-
-function setupKeyboardControls(controller: GameController): void {
+function setupKeyboard(ctrl: GameController): void {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
-
-    const player = controller.getCurrentPlayer();
-    if (player.isAI) return;
-
+    const p = ctrl.getCurrentPlayer();
+    if (p.isAI) return;
     switch (e.key) {
-      case ' ':
-      case 'Enter':
-        e.preventDefault();
-        controller.handleRollDice();
-        break;
-      case 'b':
-      case 'B':
-        controller.handleBuyProperty();
-        break;
-      case 'n':
-      case 'N':
-        controller.handleDeclineProperty();
-        break;
-      case 'e':
-      case 'E':
-        controller.handleEndTurn();
-        break;
-      case 'p':
-      case 'P':
-        controller.handlePayJailFine();
-        break;
-      case 'c':
-      case 'C':
-        controller.handleUseJailCard();
-        break;
-      // T est gere par PropertyPanel directement
+      case ' ': case 'Enter': e.preventDefault(); ctrl.handleRollDice(); break;
+      case 'b': case 'B': ctrl.handleBuyProperty(); break;
+      case 'n': case 'N': ctrl.handleDeclineProperty(); break;
+      case 'e': case 'E': ctrl.handleEndTurn(); break;
+      case 'p': case 'P': ctrl.handlePayJailFine(); break;
+      case 'c': case 'C': ctrl.handleUseJailCard(); break;
     }
   });
 }
 
-// ─── Debug : log evenements ─────────────────────────────────────────
-
-function setupEventLogging(bus: EventBus): void {
-  const events = [
-    'game:started', 'game:ended',
-    'turn:started', 'turn:ended',
-    'dice:rolled', 'dice:animation:complete',
-    'pawn:moved',
-    'property:bought', 'rent:paid',
-    'card:drawn', 'building:placed',
-    'player:jailed', 'player:released',
-    'player:bankrupt', 'player:balance:changed',
+function setupEventLog(bus: EventBus): void {
+  const evts = [
+    'game:started', 'game:ended', 'turn:started', 'turn:ended',
+    'dice:rolled', 'dice:animation:complete', 'pawn:moved',
+    'property:bought', 'rent:paid', 'card:drawn', 'building:placed',
+    'player:jailed', 'player:released', 'player:bankrupt', 'player:balance:changed',
   ] as const;
-
-  for (const event of events) {
-    bus.on(event, (data: unknown) => {
-      logger.info(`[Event] ${event}`, data);
-    });
-  }
+  for (const ev of evts) bus.on(ev, (d: unknown) => logger.info(`[Event] ${ev}`, d));
 }
 
-// ─── Lancement ──────────────────────────────────────────────────────
-
-main().catch((err: unknown) => {
-  console.error('[FATAL] Echec initialisation:', err);
-});
+main().catch((err: unknown) => console.error('[FATAL]', err));

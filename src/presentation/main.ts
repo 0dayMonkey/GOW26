@@ -1,12 +1,20 @@
 /**
- * Point d'entrée — Presentation Layer
+ * Main — Presentation Layer (Point d entree)
  *
- * Ce fichier bootstrap Babylon.js et affiche une scène minimale
- * pour valider le setup Phase 0. Il sera remplacé par le vrai
- * SceneManager en Phase 4.
+ * Bootstrap de Babylon.js, SceneManager, puis connexion
+ * au GameController pour une partie jouable.
  */
 
-import { Engine, Scene, ArcRotateCamera, HemisphericLight, MeshBuilder, Vector3 } from '@babylonjs/core';
+import { SceneManager } from './scene-manager';
+import { AssetLoader } from '@infrastructure/asset-loader';
+import { EventBus } from '@infrastructure/event-bus';
+import { Logger, LogLevel } from '@infrastructure/logger';
+import { GameController } from '@application/game-controller';
+import { createHumanPlayer, createAIPlayer } from '@game-logic/player/player-factory';
+
+const logger = Logger.create('Main');
+
+// ─── Splash screen ──────────────────────────────────────────────────
 
 function updateSplash(progress: number, status: string): void {
   const fill = document.getElementById('progressFill') as HTMLElement | null;
@@ -23,60 +31,82 @@ function hideSplash(): void {
   }
 }
 
+// ─── Bootstrap ──────────────────────────────────────────────────────
+
 async function main(): Promise<void> {
-  updateSplash(10, 'Création du moteur…');
+  updateSplash(5, 'Demarrage du moteur...');
 
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
   if (!canvas) throw new Error('Canvas #renderCanvas introuvable');
 
-  const engine = new Engine(canvas, true, {
-    preserveDrawingBuffer: false,
-    stencil: true,
-    antialias: true,
+  // 1. Scene Manager
+  const sceneManager = new SceneManager(canvas);
+  updateSplash(15, 'Creation de la scene...');
+
+  // 2. Charger les assets
+  const assetLoader = new AssetLoader(sceneManager.getScene());
+  await assetLoader.loadAll({
+    onProgress: (progress, status) => {
+      updateSplash(15 + progress * 0.6, status);
+    },
   });
 
-  updateSplash(30, 'Création de la scène…');
+  // 3. Initialiser les sous-systemes visuels
+  updateSplash(80, 'Construction du plateau 3D...');
+  await sceneManager.initialize();
 
-  const scene = new Scene(engine);
-  scene.clearColor.set(0.1, 0.1, 0.12, 1);
+  // 4. Creer le jeu
+  updateSplash(90, 'Preparation de la partie...');
+  const eventBus = new EventBus();
+  const players = [
+    createHumanPlayer('Vous', 0),
+    createAIPlayer('Bot Alice', 1),
+  ];
+  const gameController = new GameController(players, eventBus);
 
-  // Caméra orbitale — sera remplacée par CameraController
-  const camera = new ArcRotateCamera('camera', -Math.PI / 4, Math.PI / 3, 18, Vector3.Zero(), scene);
-  camera.attachControl(canvas, true);
-  camera.lowerRadiusLimit = 8;
-  camera.upperRadiusLimit = 30;
-  camera.wheelDeltaPercentage = 0.01;
+  // 5. Log des evenements en dev
+  setupEventLogging(eventBus);
 
-  updateSplash(50, 'Éclairage…');
+// 6. Stocker les references sur window pour debug
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = window as any;
+  w.__game = gameController;
+  w.__scene = sceneManager;
+  w.__bus = eventBus;
 
-  // Éclairage basique — sera remplacé par LightingSetup
-  const light = new HemisphericLight('ambient', new Vector3(0, 1, 0), scene);
-  light.intensity = 0.8;
-
-  updateSplash(70, 'Plateau placeholder…');
-
-  // Placeholder : un box vert représentant le futur plateau
-  const _ground = MeshBuilder.CreateBox(
-    'board-placeholder',
-    { width: 11, height: 0.3, depth: 11 },
-    scene,
-  );
-  _ground.position.y = -0.15;
-
-  updateSplash(100, 'Prêt !');
+  // 7. Demarrer le rendu
+  updateSplash(100, 'Pret !');
+  sceneManager.startRenderLoop();
   hideSplash();
 
-  // Render loop
-  engine.runRenderLoop(() => {
-    scene.render();
-  });
+  // 8. Demarrer la partie
+  gameController.startGame();
 
-  // Resize
-  window.addEventListener('resize', () => {
-    engine.resize();
-  });
+  logger.info('Monopoly 3D demarre');
 }
 
+// ─── Debug : log tous les evenements ────────────────────────────────
+
+function setupEventLogging(bus: EventBus): void {
+  const events = [
+    'game:started', 'game:ended',
+    'turn:started', 'turn:ended',
+    'dice:rolled', 'pawn:moved',
+    'property:bought', 'rent:paid',
+    'card:drawn', 'building:placed',
+    'player:jailed', 'player:released',
+    'player:bankrupt', 'player:balance:changed',
+  ] as const;
+
+  for (const event of events) {
+    bus.on(event, (data: unknown) => {
+      logger.info(`[Event] ${event}`, data);
+    });
+  }
+}
+
+// ─── Lancement ──────────────────────────────────────────────────────
+
 main().catch((err: unknown) => {
-  console.error('[FATAL] Échec initialisation:', err);
+  console.error('[FATAL] Echec initialisation:', err);
 });

@@ -6,13 +6,14 @@
  */
 
 import { TurnPhase, type GameState } from '@game-logic/types';
-import { type EventBus } from '@infrastructure/event-bus';
 import { Logger } from '@infrastructure/logger';
 
 const VALID_TRANSITIONS: Record<TurnPhase, readonly TurnPhase[]> = {
   [TurnPhase.WAITING_FOR_ROLL]: [TurnPhase.ROLLING],
-  [TurnPhase.ROLLING]: [TurnPhase.MOVING],
-  [TurnPhase.MOVING]: [TurnPhase.ACTION],
+  // ROLLING peut passer à MOVING (cas normal) ou à END_TURN (3 doubles → prison)
+  [TurnPhase.ROLLING]: [TurnPhase.MOVING, TurnPhase.END_TURN],
+  // MOVING peut passer à ACTION (cas normal) ou à END_TURN (envoyé en prison en cours de route)
+  [TurnPhase.MOVING]: [TurnPhase.ACTION, TurnPhase.END_TURN],
   [TurnPhase.ACTION]: [TurnPhase.BUILDING, TurnPhase.END_TURN],
   [TurnPhase.BUILDING]: [TurnPhase.END_TURN],
   [TurnPhase.END_TURN]: [TurnPhase.WAITING_FOR_ROLL],
@@ -22,11 +23,9 @@ const logger = Logger.create('TurnManager');
 
 export class TurnManager {
   private state: GameState;
-  private readonly eventBus: EventBus;
 
-  constructor(state: GameState, eventBus: EventBus) {
+  constructor(state: GameState) {
     this.state = state;
-    this.eventBus = eventBus;
   }
 
   /**

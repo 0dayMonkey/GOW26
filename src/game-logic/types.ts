@@ -112,7 +112,7 @@ export type Square = PropertySquare | StationSquare | UtilitySquare | TaxSquare 
 
 export interface OwnedProperty {
   readonly squareIndex: SquareIndex;
-  readonly ownerId: PlayerId;
+  ownerId: PlayerId; // mutable (faillite → transfert vers créancier)
   houses: number; // 0..4 maisons, 5 = hôtel
 }
 
@@ -128,6 +128,8 @@ export interface Player {
   inJail: boolean;
   jailTurns: number;
   getOutOfJailCards: number;
+  // Origine de chaque carte "Sortez de prison" possédée (pour remettre dans le bon deck à l'utilisation)
+  jailCardOrigins: CardType[];
   isBankrupt: boolean;
   doublesCount: number;
 }

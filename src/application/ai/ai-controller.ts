@@ -21,6 +21,7 @@ type GameControllerRef = {
   handleBuildHouse(squareIndex: number): void;
   handleEndTurn(): void;
   handlePayJailFine(): void;
+  handleUseJailCard(): void;
   getCurrentPlayer(): Player;
   getTurnManager(): { getPhase(): TurnPhase };
   getState(): GameState;
@@ -56,9 +57,14 @@ export class AIController {
 
     logger.info(`IA ${player.name} commence son tour`);
     this.delayedAction(AI_THINK_DELAY_MS.roll, () => {
-      // Si en prison, essayer de payer si possible
-      if (player.inJail && player.balance >= 50 && player.jailTurns >= 1) {
-        this.controller.handlePayJailFine();
+      // En prison : priorité à la carte "Sortez de prison", sinon paiement si raisonnable
+      if (player.inJail) {
+        if (player.getOutOfJailCards > 0) {
+          this.controller.handleUseJailCard();
+        } else if (player.balance >= 200 && player.jailTurns >= 1) {
+          // Paie l'amende seulement si confortablement riche
+          this.controller.handlePayJailFine();
+        }
       }
       this.controller.handleRollDice();
     });
@@ -129,9 +135,14 @@ export class AIController {
 
   /**
    * Executer une action apres un delai simule.
+   * Si une action est déjà en vol, on la re-planifie après au lieu de l'ignorer.
    */
   private delayedAction(delayMs: number, action: () => void): void {
-    if (this.thinking) return;
+    if (this.thinking) {
+      // Re-planifier au lieu d'ignorer silencieusement
+      setTimeout(() => this.delayedAction(delayMs, action), delayMs);
+      return;
+    }
     this.thinking = true;
 
     setTimeout(() => {
@@ -140,7 +151,6 @@ export class AIController {
         action();
       } catch (err: unknown) {
         logger.error('Erreur IA:', err);
-        this.thinking = false;
       }
     }, delayMs);
   }

@@ -129,7 +129,10 @@ export class HudOverlay {
    * Connecter les evenements pour mise a jour automatique.
    */
   connectEvents(): void {
-    this.eventBus.on('turn:started', () => this.update());
+    this.eventBus.on('turn:started', () => {
+      // Réinitialiser l'indicateur (effacer l'affichage des dés du tour précédent)
+      this.update();
+    });
     this.eventBus.on('turn:ended', () => this.update());
     this.eventBus.on('player:balance:changed', () => this.update());
     this.eventBus.on('property:bought', () => this.update());

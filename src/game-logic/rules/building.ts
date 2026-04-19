@@ -15,10 +15,30 @@ import {
   ok,
   fail,
 } from '../types';
-import { getSquare } from '../board/board';
+import { getSquare, getPropertiesByColor } from '../board/board';
 import { hasMonopoly } from '../board/property-group';
 import { MAX_HOUSES, HOTEL_LEVEL } from '../constants';
 import { findPlayer, adjustBalance, canAfford } from '../player/player';
+
+// Banque : nombre maximal de maisons/hôtels en circulation (règle officielle).
+export const BANK_HOUSES_TOTAL = 32;
+export const BANK_HOTELS_TOTAL = 12;
+
+/**
+ * Compte les maisons et hôtels actuellement placés sur le plateau.
+ */
+function countBankUsage(properties: readonly OwnedProperty[]): {
+  houses: number;
+  hotels: number;
+} {
+  let houses = 0;
+  let hotels = 0;
+  for (const p of properties) {
+    if (p.houses >= 1 && p.houses <= MAX_HOUSES) houses += p.houses;
+    else if (p.houses === HOTEL_LEVEL) hotels += 1;
+  }
+  return { houses, hotels };
+}
 
 /**
  * Peut-on construire une maison/hôtel sur cette case ?
@@ -49,6 +69,47 @@ export function canBuild(
     return fail('MAX_BUILDINGS', 'Cette propriété a déjà un hôtel');
   }
 
+  // Règle de construction uniforme : on ne peut construire sur une propriété
+  // que si elle a le moins de bâtiments (ou ex-æquo) dans son groupe.
+  const groupProps = getPropertiesByColor(square.color);
+  const groupOwned = state.properties.filter(
+    (p) =>
+      p.ownerId === playerId &&
+      groupProps.some((gp) => gp.index === p.squareIndex),
+  );
+  const minInGroup = groupOwned.reduce(
+    (min, p) => (p.houses < min ? p.houses : min),
+    HOTEL_LEVEL,
+  );
+  if (owned.houses > minInGroup) {
+    return fail(
+      'BUILD_UNEVEN',
+      'Construction non équitable : d\'autres propriétés du groupe ont moins de maisons',
+    );
+  }
+
+  const newLevel = owned.houses + 1;
+
+  // Limites de la banque (32 maisons / 12 hôtels).
+  const usage = countBankUsage(state.properties);
+  if (newLevel < HOTEL_LEVEL) {
+    // On ajoute une maison
+    if (usage.houses >= BANK_HOUSES_TOTAL) {
+      return fail(
+        'NO_HOUSES_IN_BANK',
+        'La banque n\'a plus de maisons disponibles',
+      );
+    }
+  } else {
+    // Passage en hôtel : on rend 4 maisons et on prend 1 hôtel
+    if (usage.hotels >= BANK_HOTELS_TOTAL) {
+      return fail(
+        'NO_HOTELS_IN_BANK',
+        'La banque n\'a plus d\'hôtels disponibles',
+      );
+    }
+  }
+
   const cost = (square as PropertySquare).houseCost;
   const player = findPlayer(state.players, playerId);
   if (!player) {
@@ -59,7 +120,7 @@ export function canBuild(
     return fail('INSUFFICIENT_FUNDS', `Fonds insuffisants (besoin de ${cost}€)`);
   }
 
-  return ok({ cost, newLevel: owned.houses + 1 });
+  return ok({ cost, newLevel });
 }
 
 /**

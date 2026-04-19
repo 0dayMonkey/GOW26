@@ -9,12 +9,22 @@
 import {
   type GameState,
   type Player,
+  type PlayerId,
   type DiceRoll,
   type OwnedProperty,
   TurnPhase,
   SquareType,
 } from '@game-logic/types';
-import { createGameState, getCurrentPlayer, advanceToNextPlayer, addOwnedProperty, getPropertyOwner, isGameOver, getWinner } from '@game-logic/state/game-state';
+import {
+  createGameState,
+  getCurrentPlayer,
+  advanceToNextPlayer,
+  addOwnedProperty,
+  getPropertyOwner,
+  isGameOver,
+  getWinner,
+  transferBankruptAssets,
+} from '@game-logic/state/game-state';
 import { rollDice } from '@game-logic/rules/dice';
 import { movePlayer } from '@game-logic/rules/movement';
 import { calculateRent } from '@game-logic/rules/rent';
@@ -24,7 +34,7 @@ import { drawChanceCard, drawCommunityCard } from '@game-logic/cards/card-deck';
 import { applyCardEffect } from '@game-logic/cards/card-effects';
 import { getSquare, isPurchasable, getPurchasePrice } from '@game-logic/board/board';
 import { adjustBalance, declareBankrupt, canAfford } from '@game-logic/player/player';
-import { MAX_DOUBLES_BEFORE_JAIL } from '@game-logic/constants';
+import { MAX_DOUBLES_BEFORE_JAIL, JAIL_SQUARE, GO_SALARY } from '@game-logic/constants';
 import { type EventBus } from '@infrastructure/event-bus';
 import { Logger } from '@infrastructure/logger';
 import { TurnManager } from './turn-manager';
@@ -38,19 +48,32 @@ export class GameController {
   private readonly turnManager: TurnManager;
   private readonly aiController: AIController;
   private lastDice: DiceRoll | null = null;
-  private waitingForAnimation = false;
+  private waitingForDiceAnimation = false;
+  private waitingForPawnAnimation = false;
+  private escapedJailByDoubleThisTurn = false;
+  private pendingAfterPawnAction: (() => void) | null = null;
 
   constructor(players: Player[], eventBus: EventBus) {
     this.state = createGameState(players);
     this.eventBus = eventBus;
-    this.turnManager = new TurnManager(this.state, eventBus);
+    this.turnManager = new TurnManager(this.state);
     this.aiController = new AIController(this.state, eventBus, this);
 
     // Ecouter la fin d animation des des pour continuer le tour
-    this.eventBus.on('dice:animation:complete', (data) => {
-      if (this.waitingForAnimation) {
-        this.waitingForAnimation = false;
+    this.eventBus.on('dice:animation:complete', () => {
+      if (this.waitingForDiceAnimation) {
+        this.waitingForDiceAnimation = false;
         this.continueAfterDiceAnimation();
+      }
+    });
+
+    // Ecouter la fin d animation du pion pour résoudre la case visuellement
+    this.eventBus.on('pawn:animation:complete', () => {
+      if (this.waitingForPawnAnimation && this.pendingAfterPawnAction) {
+        this.waitingForPawnAnimation = false;
+        const action = this.pendingAfterPawnAction;
+        this.pendingAfterPawnAction = null;
+        action();
       }
     });
 
@@ -89,12 +112,11 @@ export class GameController {
    * et on attend dice:animation:complete avant de deplacer le pion.
    */
   handleRollDice(): void {
-    const player = this.getCurrentPlayer();
     if (this.turnManager.getPhase() !== TurnPhase.WAITING_FOR_ROLL) {
       logger.warn('Roll ignore: mauvaise phase', { phase: this.turnManager.getPhase() });
       return;
     }
-    if (this.waitingForAnimation) {
+    if (this.waitingForDiceAnimation || this.waitingForPawnAnimation) {
       logger.warn('Roll ignore: animation en cours');
       return;
     }
@@ -106,7 +128,7 @@ export class GameController {
 
     // Emettre dice:rolled → declenche l animation des des
     // Le deplacement se fera dans continueAfterDiceAnimation()
-    this.waitingForAnimation = true;
+    this.waitingForDiceAnimation = true;
     this.eventBus.emit('dice:rolled', {
       values: dice.values,
       isDouble: dice.isDouble,
@@ -154,26 +176,48 @@ export class GameController {
     if (moveResult.passedGo) {
       this.eventBus.emit('player:balance:changed', {
         playerId: player.id,
-        delta: 200,
+        delta: GO_SALARY,
         newBalance: player.balance,
       });
     }
 
     if (moveResult.landedOnGoToJail) {
       this.eventBus.emit('player:jailed', { playerId: player.id });
-      this.finishTurn();
+      // On attend la fin de l'animation du pion avant de passer au tour suivant
+      this.scheduleAfterPawnAnimation(() => this.finishTurn());
       return;
     }
 
-    // Resolution de la case
-    this.turnManager.startAction();
-    this.resolveSquare(player);
+    // Resolution de la case APRÈS l'animation du pion (pour que le joueur voie
+    // bien le pion arriver avant d'être sollicité pour acheter/payer/etc.)
+    this.scheduleAfterPawnAnimation(() => {
+      this.turnManager.startAction();
+      this.resolveSquare(player);
+    });
+  }
+
+  /**
+   * Exécute une action après que l'animation du pion soit terminée.
+   * Si rien n'écoute pawn:animation:complete (ex. tests), exécute immédiatement.
+   */
+  private scheduleAfterPawnAnimation(action: () => void): void {
+    if (this.eventBus.listenerCount('pawn:animation:complete') === 0) {
+      // Personne n'animera le pion → pas d'événement attendu
+      action();
+      return;
+    }
+    this.waitingForPawnAnimation = true;
+    this.pendingAfterPawnAction = action;
   }
 
   /**
    * Acheter la propriete sur laquelle le joueur se trouve.
    */
   handleBuyProperty(): void {
+    if (this.turnManager.getPhase() !== TurnPhase.ACTION) {
+      logger.warn('Buy ignore: mauvaise phase', { phase: this.turnManager.getPhase() });
+      return;
+    }
     const player = this.getCurrentPlayer();
     const square = getSquare(player.position);
 
@@ -252,7 +296,7 @@ export class GameController {
    */
   handleUseJailCard(): void {
     const player = this.getCurrentPlayer();
-    const result = useGetOutOfJailCard(player);
+    const result = useGetOutOfJailCard(player, this.state);
     if (result.success) {
       this.eventBus.emit('player:released', { playerId: player.id });
     }
@@ -265,16 +309,29 @@ export class GameController {
     const player = this.getCurrentPlayer();
     const phase = this.turnManager.getPhase();
 
-    if (phase === TurnPhase.ACTION || phase === TurnPhase.BUILDING) {
+    if (
+      phase === TurnPhase.ACTION ||
+      phase === TurnPhase.BUILDING ||
+      phase === TurnPhase.MOVING ||
+      phase === TurnPhase.ROLLING
+    ) {
       this.turnManager.endTurn();
     } else if (phase !== TurnPhase.END_TURN) {
       logger.warn('EndTurn ignore: mauvaise phase', { phase });
       return;
     }
 
-    // Double → rejouer (sauf si en prison)
-    if (this.lastDice?.isDouble && !player.inJail) {
+    // Double → rejouer, SAUF si :
+    //  - le joueur est maintenant en prison (3 doubles ou carte Aller-en-prison)
+    //  - le joueur vient juste de sortir de prison par double (règle officielle)
+    const canRollAgain =
+      this.lastDice?.isDouble &&
+      !player.inJail &&
+      !this.escapedJailByDoubleThisTurn;
+
+    if (canRollAgain) {
       logger.info(`${player.name} a fait un double, rejoue`);
+      this.eventBus.emit('turn:ended', { playerId: player.id });
       this.turnManager.nextTurn();
       this.eventBus.emit('turn:started', { playerId: player.id });
       this.checkIfAITurn();
@@ -284,6 +341,7 @@ export class GameController {
     // Tour suivant
     this.eventBus.emit('turn:ended', { playerId: player.id });
     player.doublesCount = 0;
+    this.escapedJailByDoubleThisTurn = false;
     advanceToNextPlayer(this.state);
 
     // Fin de partie ?
@@ -320,6 +378,8 @@ export class GameController {
       }
 
       if (dice.isDouble) {
+        // Sortie de prison par double : on se déplace, MAIS pas de tour supplémentaire
+        this.escapedJailByDoubleThisTurn = true;
         this.turnManager.startMoving();
         const moveResult = movePlayer(player, dice);
         this.eventBus.emit('pawn:moved', {
@@ -328,18 +388,34 @@ export class GameController {
           to: moveResult.to,
           steps: moveResult.steps,
         });
-        this.turnManager.startAction();
-        this.resolveSquare(player);
+        if (moveResult.passedGo) {
+          this.eventBus.emit('player:balance:changed', {
+            playerId: player.id,
+            delta: GO_SALARY,
+            newBalance: player.balance,
+          });
+        }
+        if (moveResult.landedOnGoToJail) {
+          this.eventBus.emit('player:jailed', { playerId: player.id });
+          this.scheduleAfterPawnAnimation(() => this.finishTurn());
+          return;
+        }
+        this.scheduleAfterPawnAnimation(() => {
+          this.turnManager.startAction();
+          this.resolveSquare(player);
+        });
         return;
       }
+      // Sortie sans double (paiement forcé au 3ème tour) : fin de tour
+      this.finishTurn();
+      return;
     }
 
-    this.turnManager.startMoving();
-    this.turnManager.startAction();
+    // Toujours en prison : on termine le tour
     this.finishTurn();
   }
 
-  private resolveSquare(player: Player): void {
+  private resolveSquare(player: Player, cardDepth: number = 0): void {
     const square = getSquare(player.position);
 
     switch (square.type) {
@@ -358,7 +434,8 @@ export class GameController {
           });
         } else if (owner.ownerId !== player.id) {
           this.payRent(player, owner);
-          this.afterAction();
+          // Si le joueur a fait faillite via le loyer, on ne propose pas "fin de tour"
+          if (!player.isBankrupt) this.afterAction();
         } else {
           this.afterAction();
         }
@@ -367,36 +444,36 @@ export class GameController {
 
       case SquareType.TAX: {
         const amount = square.amount;
-        adjustBalance(player, -amount);
+        const actuallyPaid = Math.min(amount, Math.max(0, player.balance));
+        adjustBalance(player, -actuallyPaid);
         this.eventBus.emit('player:balance:changed', {
           playerId: player.id,
-          delta: -amount,
+          delta: -actuallyPaid,
           newBalance: player.balance,
         });
         this.eventBus.emit('ui:notification', {
-          message: `${player.name} paye ${amount}€ de taxes`,
+          message: `${player.name} paye ${actuallyPaid}€ de taxes`,
           level: 'warn',
         });
-        this.checkBankruptcy(player);
-        this.afterAction();
+        if (actuallyPaid < amount) {
+          // Faillite vers la banque
+          this.declareBankruptcy(player, null);
+        }
+        if (!player.isBankrupt) this.afterAction();
         break;
       }
 
       case SquareType.CHANCE: {
         const card = drawChanceCard(this.state);
         this.eventBus.emit('card:drawn', { type: 'chance', cardId: card.id });
-        const effect = applyCardEffect(card, player, this.state);
-        this.handleCardResult(player, effect.balanceChange);
-        this.afterAction();
+        this.applyCardAndResolve(player, card, cardDepth);
         break;
       }
 
       case SquareType.COMMUNITY_CHEST: {
         const card = drawCommunityCard(this.state);
         this.eventBus.emit('card:drawn', { type: 'community', cardId: card.id });
-        const effect = applyCardEffect(card, player, this.state);
-        this.handleCardResult(player, effect.balanceChange);
-        this.afterAction();
+        this.applyCardAndResolve(player, card, cardDepth);
         break;
       }
 
@@ -406,35 +483,90 @@ export class GameController {
     }
   }
 
+  /**
+   * Applique l'effet d'une carte, émet les événements, et re-résout la case
+   * d'arrivée si la carte a déplacé le joueur (pour payer loyer, proposer achat, etc.)
+   */
+  private applyCardAndResolve(
+    player: Player,
+    card: ReturnType<typeof drawChanceCard>,
+    cardDepth: number,
+  ): void {
+    const posBefore = player.position;
+    const effect = applyCardEffect(card, player, this.state);
+    this.handleCardResult(player, effect.balanceChange);
+
+    if (player.isBankrupt) {
+      return;
+    }
+
+    // Si la carte envoie en prison : fin de tour
+    if (effect.jailed) {
+      this.eventBus.emit('player:jailed', { playerId: player.id });
+      this.finishTurn();
+      return;
+    }
+
+    // Si la carte a déplacé le joueur, émettre pawn:moved et re-résoudre la case
+    if (effect.moved && player.position !== posBefore) {
+      this.eventBus.emit('pawn:moved', {
+        playerId: player.id,
+        from: posBefore,
+        to: player.position,
+        steps: [player.position],
+      });
+      // Limiter la récursion (carte qui envoie vers une autre carte)
+      if (cardDepth >= 3) {
+        logger.warn('Profondeur de cartes atteinte, on arrête la résolution');
+        this.afterAction();
+        return;
+      }
+      this.scheduleAfterPawnAnimation(() => {
+        this.resolveSquare(player, cardDepth + 1);
+      });
+      return;
+    }
+
+    this.afterAction();
+  }
+
   private payRent(player: Player, owner: OwnedProperty): void {
     const dice = this.lastDice ?? { values: [1, 1] as [number, number], total: 2, isDouble: true };
     const rent = calculateRent(player.position, player.id, this.state, dice);
 
-    if (rent > 0) {
-      adjustBalance(player, -rent);
-      const ownerPlayer = this.state.players.find((p) => p.id === owner.ownerId);
+    if (rent <= 0) return;
+
+    // Plafonner au solde du joueur : il ne peut payer que ce qu'il a
+    const actuallyPaid = Math.min(rent, Math.max(0, player.balance));
+    const ownerPlayer = this.state.players.find((p) => p.id === owner.ownerId);
+
+    if (actuallyPaid > 0) {
+      adjustBalance(player, -actuallyPaid);
       if (ownerPlayer) {
-        adjustBalance(ownerPlayer as Player, rent);
+        adjustBalance(ownerPlayer, actuallyPaid);
         this.eventBus.emit('player:balance:changed', {
           playerId: ownerPlayer.id,
-          delta: rent,
+          delta: actuallyPaid,
           newBalance: ownerPlayer.balance,
         });
       }
-
       this.eventBus.emit('rent:paid', {
         fromId: player.id,
         toId: owner.ownerId,
-        amount: rent,
+        amount: actuallyPaid,
       });
       this.eventBus.emit('player:balance:changed', {
         playerId: player.id,
-        delta: -rent,
+        delta: -actuallyPaid,
         newBalance: player.balance,
       });
+    }
 
-      logger.info(`${player.name} paye ${rent}€ de loyer`);
-      this.checkBankruptcy(player);
+    logger.info(`${player.name} paye ${actuallyPaid}€ de loyer (dû: ${rent}€)`);
+
+    if (actuallyPaid < rent) {
+      // Faillite envers le propriétaire : transfert des actifs
+      this.declareBankruptcy(player, owner.ownerId);
     }
   }
 
@@ -446,15 +578,29 @@ export class GameController {
         newBalance: player.balance,
       });
     }
-    this.checkBankruptcy(player);
+    if (player.balance < 0) {
+      // Faillite envers la banque (pas de créancier identifié)
+      this.declareBankruptcy(player, null);
+    }
   }
 
-  private checkBankruptcy(player: Player): void {
-    if (player.balance < 0) {
-      declareBankrupt(player);
-      this.eventBus.emit('player:bankrupt', { playerId: player.id });
-      logger.info(`${player.name} est en faillite`);
-    }
+  /**
+   * Déclare un joueur en faillite et transfère ses actifs au créancier
+   * (ou à la banque si creditorId === null).
+   */
+  private declareBankruptcy(player: Player, creditorId: PlayerId | null): void {
+    if (player.isBankrupt) return;
+    transferBankruptAssets(this.state, player.id, creditorId);
+    declareBankrupt(player);
+    this.eventBus.emit('player:bankrupt', { playerId: player.id });
+    this.eventBus.emit('player:balance:changed', {
+      playerId: player.id,
+      delta: 0,
+      newBalance: player.balance,
+    });
+    logger.info(
+      `${player.name} est en faillite${creditorId ? ` (créancier: ${creditorId})` : ' (banque)'}`,
+    );
   }
 
   private afterAction(): void {
@@ -465,17 +611,17 @@ export class GameController {
   }
 
   private finishTurn(): void {
-    if (this.turnManager.getPhase() === TurnPhase.ACTION) {
-      this.turnManager.endTurn();
-    } else if (this.turnManager.getPhase() !== TurnPhase.END_TURN) {
-      try { this.turnManager.startAction(); } catch { /* already past */ }
-      try { this.turnManager.endTurn(); } catch { /* already there */ }
+    // La state machine accepte maintenant ROLLING/MOVING/ACTION/BUILDING → END_TURN,
+    // donc pas besoin de try/catch.
+    const phase = this.turnManager.getPhase();
+    if (phase !== TurnPhase.END_TURN) {
+      this.turnManager.transitionTo(TurnPhase.END_TURN);
     }
     this.handleEndTurn();
   }
 
   private sendPlayerToJail(player: Player): void {
-    player.position = 10;
+    player.position = JAIL_SQUARE;
     player.inJail = true;
     player.jailTurns = 0;
     player.doublesCount = 0;

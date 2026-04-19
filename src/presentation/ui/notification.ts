@@ -17,7 +17,6 @@ const TOAST_FADE = 400;
 export class NotificationSystem {
   private readonly eventBus: EventBus;
   private container: HTMLElement | null = null;
-  private toastCount = 0;
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
@@ -87,7 +86,7 @@ export class NotificationSystem {
 
     // Notifications automatiques pour les evenements cles
     this.eventBus.on('property:bought', (data) => {
-      const state = (window as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
+      const state = (window as unknown as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
       const player = state?.getState().players.find((p) => p.id === data.playerId);
       this.showToast(`${player?.name ?? 'Joueur'} achete pour ${data.price} €`, 'success');
     });
@@ -102,25 +101,25 @@ export class NotificationSystem {
     });
 
     this.eventBus.on('player:jailed', (data) => {
-      const state = (window as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
+      const state = (window as unknown as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
       const player = state?.getState().players.find((p) => p.id === data.playerId);
       this.showToast(`⛓ ${player?.name ?? 'Joueur'} va en prison !`, 'warn');
     });
 
     this.eventBus.on('player:released', (data) => {
-      const state = (window as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
+      const state = (window as unknown as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
       const player = state?.getState().players.find((p) => p.id === data.playerId);
       this.showToast(`🔓 ${player?.name ?? 'Joueur'} sort de prison`, 'success');
     });
 
     this.eventBus.on('player:bankrupt', (data) => {
-      const state = (window as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
+      const state = (window as unknown as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
       const player = state?.getState().players.find((p) => p.id === data.playerId);
       this.showToast(`💀 ${player?.name ?? 'Joueur'} est en faillite !`, 'warn');
     });
 
     this.eventBus.on('game:ended', (data) => {
-      const state = (window as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
+      const state = (window as unknown as Record<string, unknown>).__game as { getState: () => { players: Array<{ id: string; name: string }> } } | undefined;
       const winner = state?.getState().players.find((p) => p.id === data.winnerId);
       this.showToast(`🏆 ${winner?.name ?? 'Joueur'} remporte la partie !`, 'success');
     });

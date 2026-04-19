@@ -28,6 +28,7 @@ export function createHumanPlayer(name: string, pawnIndex: number): Player {
     inJail: false,
     jailTurns: 0,
     getOutOfJailCards: 0,
+    jailCardOrigins: [],
     isBankrupt: false,
     doublesCount: 0,
   };
@@ -47,6 +48,7 @@ export function createAIPlayer(name: string, pawnIndex: number): Player {
     inJail: false,
     jailTurns: 0,
     getOutOfJailCards: 0,
+    jailCardOrigins: [],
     isBankrupt: false,
     doublesCount: 0,
   };

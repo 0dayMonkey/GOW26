@@ -4,9 +4,18 @@
  * Logique de la prison : entrée, passage de tours, sortie par dé/paiement/carte.
  */
 
-import { type Player, type DiceRoll, type GameResult, ok, fail } from '../types';
+import {
+  type Player,
+  type DiceRoll,
+  type GameResult,
+  type GameState,
+  CardType,
+  ok,
+  fail,
+} from '../types';
 import { sendToJail, releaseFromJail, adjustBalance, canAfford } from '../player/player';
 import { MAX_JAIL_TURNS, JAIL_FINE } from '../constants';
+import { returnGetOutOfJailCard } from '../cards/card-deck';
 
 export enum JailAction {
   ROLL_DOUBLES = 'ROLL_DOUBLES',
@@ -69,8 +78,12 @@ export function payJailFine(player: Player): GameResult<JailResult> {
 
 /**
  * Utiliser une carte "Sortez de prison".
+ * Si `state` est fourni, la carte est rendue au bon deck d'origine.
  */
-export function useGetOutOfJailCard(player: Player): GameResult<JailResult> {
+export function useGetOutOfJailCard(
+  player: Player,
+  state?: GameState,
+): GameResult<JailResult> {
   if (!player.inJail) {
     return fail('NOT_IN_JAIL', 'Le joueur n\'est pas en prison');
   }
@@ -80,6 +93,11 @@ export function useGetOutOfJailCard(player: Player): GameResult<JailResult> {
   }
 
   player.getOutOfJailCards--;
+  // Rendre la carte au deck d'origine (le plus récent)
+  const origin = player.jailCardOrigins.pop() ?? CardType.CHANCE;
+  if (state) {
+    returnGetOutOfJailCard(state, origin);
+  }
   releaseFromJail(player);
 
   return ok({ released: true, action: JailAction.USE_CARD });

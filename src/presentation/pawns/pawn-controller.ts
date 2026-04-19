@@ -17,6 +17,7 @@ import { type EventBus } from '@infrastructure/event-bus';
 import { type PawnMesh, PawnFactory } from './pawn-factory';
 import { type BoardMeshBuilder, type SquareWorldPosition } from '../board/board-mesh-builder';
 import { type Player } from '@game-logic/types';
+import { JAIL_SQUARE } from '@game-logic/constants';
 import { Logger } from '@infrastructure/logger';
 
 const logger = Logger.create('PawnController');
@@ -34,6 +35,8 @@ export class PawnController {
   private readonly pawnFactory: PawnFactory;
   private readonly pawns: Map<string, PawnMesh> = new Map();
   private animating = false;
+  // File d'animations pour éviter les chevauchements si des événements arrivent trop vite
+  private animationQueue: Array<() => Promise<void>> = [];
 
   constructor(
     scene: Scene,
@@ -67,18 +70,36 @@ export class PawnController {
     logger.info(`${players.length} pions crees`);
   }
 
+  private async runQueuedAnimation(task: () => Promise<void>): Promise<void> {
+    this.animationQueue.push(task);
+    if (this.animating) return;
+    this.animating = true;
+    try {
+      while (this.animationQueue.length > 0) {
+        const next = this.animationQueue.shift()!;
+        await next();
+      }
+    } finally {
+      this.animating = false;
+    }
+  }
+
   /**
    * Connecter les evenements du bus.
    */
   connectEvents(): void {
     this.eventBus.on('pawn:moved', (data) => {
-      this.animateMovement(data.playerId, data.steps as number[]).catch((err) => {
-        logger.error('Erreur animation pion:', err);
-      });
+      this.runQueuedAnimation(async () => {
+        await this.animateMovement(data.playerId, data.steps as number[]);
+        this.eventBus.emit('pawn:animation:complete', {
+          playerId: data.playerId,
+          to: data.to,
+        });
+      }).catch((err) => logger.error('Erreur animation pion:', err));
     });
 
     this.eventBus.on('player:jailed', (data) => {
-      this.teleportToSquare(data.playerId, 10);
+      this.teleportToSquare(data.playerId, JAIL_SQUARE);
     });
 
     logger.info('Evenements pion connectes');
@@ -91,14 +112,10 @@ export class PawnController {
     const pawn = this.pawns.get(playerId);
     if (!pawn) return;
 
-    this.animating = true;
-
     for (const stepIndex of steps) {
       const targetPos = this.boardBuilder.getSquarePosition(stepIndex);
       await this.animateHopToPosition(pawn, targetPos);
     }
-
-    this.animating = false;
   }
 
   /**
@@ -179,8 +196,15 @@ export class PawnController {
 
   /**
    * Decalage pour eviter que les pions se superposent sur une meme case.
+   * Pour 2 joueurs, étale en diagonale ; pour 3-4, utilise les 4 quadrants.
    */
   private getPawnOffset(playerIndex: number, totalPlayers: number): { x: number; z: number } {
+    if (totalPlayers <= 1) return { x: 0, z: 0 };
+    if (totalPlayers === 2) {
+      return playerIndex === 0
+        ? { x: -PAWN_OFFSET, z: -PAWN_OFFSET }
+        : { x: PAWN_OFFSET, z: PAWN_OFFSET };
+    }
     const offsets = [
       { x: -PAWN_OFFSET, z: -PAWN_OFFSET },
       { x: PAWN_OFFSET, z: -PAWN_OFFSET },

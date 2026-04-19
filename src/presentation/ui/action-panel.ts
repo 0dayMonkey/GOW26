@@ -7,7 +7,7 @@
  */
 
 import { type EventBus } from '@infrastructure/event-bus';
-import { type GameState, TurnPhase } from '@game-logic/types';
+import { type GameState } from '@game-logic/types';
 import { Logger } from '@infrastructure/logger';
 
 const logger = Logger.create('ActionPanel');

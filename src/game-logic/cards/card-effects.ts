@@ -14,6 +14,7 @@ import { adjustBalance, sendToJail, getActivePlayers } from '../player/player';
 import { movePlayerTo, movePlayerBack } from '../rules/movement';
 import { nearestStation } from '../board/board';
 import { countPlayerHouses, countPlayerHotels } from '../rules/building';
+import { BOARD_SIZE } from '../constants';
 
 export interface CardEffectResult {
   readonly description: string;
@@ -57,7 +58,7 @@ export function applyCardEffect(
       return handlePayRepairs(card, player, state);
 
     case CardEffectType.GET_OUT_OF_JAIL:
-      return handleGetOutOfJail(player);
+      return handleGetOutOfJail(card, player);
 
     default:
       return { description: 'Effet inconnu', balanceChange: 0, moved: false, jailed: false, gotJailCard: false };
@@ -96,15 +97,16 @@ function handleMoveToNearestStation(player: Player): CardEffectResult {
 
 function handleMoveBy(card: CardDefinition, player: Player): CardEffectResult {
   const steps = card.value ?? 0;
+  const balanceBefore = player.balance;
   if (steps < 0) {
     movePlayerBack(player, Math.abs(steps));
   } else {
-    movePlayerTo(player, (player.position + steps) % 40);
+    movePlayerTo(player, (player.position + steps) % BOARD_SIZE);
   }
 
   return {
     description: card.description,
-    balanceChange: 0,
+    balanceChange: player.balance - balanceBefore,
     moved: true,
     jailed: false,
     gotJailCard: false,
@@ -193,8 +195,9 @@ function handlePayRepairs(
   };
 }
 
-function handleGetOutOfJail(player: Player): CardEffectResult {
+function handleGetOutOfJail(card: CardDefinition, player: Player): CardEffectResult {
   player.getOutOfJailCards++;
+  player.jailCardOrigins.push(card.type);
   return {
     description: 'Carte "Sortez de prison" — conservée.',
     balanceChange: 0,

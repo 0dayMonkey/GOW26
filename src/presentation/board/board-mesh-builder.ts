@@ -26,7 +26,6 @@ import {
   StandardMaterial,
   PBRMaterial,
   Color3,
-  Texture,
 } from '@babylonjs/core';
 import { generateMonopolyBoardTexture } from './board-texture-generator';
 import { Logger } from '@infrastructure/logger';
@@ -57,8 +56,6 @@ export class BoardMeshBuilder {
   private readonly scene: Scene;
   private readonly squarePositions: SquareWorldPosition[] = [];
   private boardBase: Mesh | null = null;
-  private boardFrame: Mesh | null = null;
-  private useFallback = false;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -76,7 +73,6 @@ export class BoardMeshBuilder {
       logger.info('Plateau texture construit (1 draw call)');
     } catch (err: unknown) {
       logger.warn('Echec texture baked, fallback procedural', err);
-      this.useFallback = true;
       this.buildFallbackBoard();
     }
   }
@@ -187,9 +183,7 @@ export class BoardMeshBuilder {
   }
 
   private buildFallbackSquares(): void {
-    const { default: boardSquares } = { default: [] };
-    // Import inline pour eviter la dependance circulaire en fallback
-    // On reutilise les positions calculees
+    // On réutilise les positions calculées
     for (let i = 0; i < 40; i++) {
       const pos = this.squarePositions[i]!;
       const isCorner = i % 10 === 0;

@@ -184,7 +184,7 @@ function drawOuterBorder(ctx: CanvasRenderingContext2D): void {
   ctx.strokeRect(c, c, TEX_SIZE - 2 * c, TEX_SIZE - 2 * c);
 }
 
-function drawCornerCell(ctx: CanvasRenderingContext2D, cell: CellRect, square: Square): void {
+function drawCornerCell(ctx: CanvasRenderingContext2D, cell: CellRect, _square: Square): void {
   const { x, y, w, h, squareIndex } = cell;
   ctx.fillStyle = CORNER_BG[squareIndex] ?? '#FFF';
   ctx.fillRect(x, y, w, h);
@@ -309,7 +309,6 @@ function drawCellText(ctx: CanvasRenderingContext2D, cell: CellRect, name: strin
 
   const lW = isVert ? w : h;
   const lH = isVert ? h : w;
-  const textCenterY = (-lH / 2 + stripH + 4 + (lH - stripH - 8)) / 2 - lH / 2 + stripH + 4;
   const nameSize = Math.round(lW * 0.09);
 
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';

@@ -34,8 +34,6 @@ const GROUP_CSS: Record<string, string> = {
   [ColorGroup.DARK_BLUE]: '#003D99',
 };
 
-const PLAYER_COLORS = ['#d32f2f', '#1565c0', '#2e7d32', '#f9a825'];
-
 // ═══════════════════════════════════════════════════════════════════════
 
 export class PropertyPanel {

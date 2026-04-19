@@ -27,7 +27,7 @@
  */
 
 import {
-  Scene, MeshBuilder, Mesh, Vector3, Quaternion,
+  Scene, MeshBuilder, Mesh, Quaternion,
   StandardMaterial, PBRMaterial, DynamicTexture, Color3,
   Animation, EasingFunction, BackEase, CubicEase,
   Observer, PointerEventTypes, Texture, ArcRotateCamera,
@@ -148,7 +148,7 @@ export class HoverCard3D {
     });
 
     // Debut de tour → sync immediate (pion au repos)
-    eventBus.on('turn:started', (data) => {
+    eventBus.on('turn:started', () => {
       this.cancelScheduledSync();
       const hp = this.humanPlayer();
       if (!hp) return;

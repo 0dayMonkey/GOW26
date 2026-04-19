@@ -15,7 +15,6 @@ export class AudioManager {
   private readonly eventBus: EventBus;
   private ctx: AudioContext | null = null;
   private enabled = true;
-  private initialized = false;
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
@@ -137,7 +136,6 @@ export class AudioManager {
     if (!this.ctx) {
       try {
         this.ctx = new AudioContext();
-        this.initialized = true;
         logger.info('AudioContext cree');
       } catch {
         logger.warn('Web Audio API non disponible');

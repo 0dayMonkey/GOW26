@@ -18,10 +18,9 @@ export interface LoadingCallbacks {
 }
 
 export class AssetLoader {
-  private readonly scene: Scene;
-
-  constructor(scene: Scene) {
-    this.scene = scene;
+  // La scène sera nécessaire dès qu'on chargera des .glb (Phase 5+).
+  constructor(_scene: Scene) {
+    // Placeholder — actuellement pas utilisé (tout est procedural).
   }
 
   /**

@@ -46,13 +46,9 @@ export class PostProcessingManager {
       this.pipeline.imageProcessingEnabled = enabled;
     }
     if (this.ssao) {
-      const ratio = this.ssao.getScene()?.getEngine().getRenderWidth() ?? 1;
-      // On ne peut pas disable directement, on met les samples a 0
-      if (!enabled) {
-        this.ssao.totalStrength = 0;
-      } else {
-        this.ssao.totalStrength = 0.8;
-      }
+      // On ne peut pas disable directement la pipeline SSAO :
+      // on met la force à 0 pour la désactiver visuellement.
+      this.ssao.totalStrength = enabled ? 0.8 : 0;
     }
   }
 

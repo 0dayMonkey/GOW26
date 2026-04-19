@@ -20,6 +20,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
       "@game-logic/*": ["src/game-logic/*"],

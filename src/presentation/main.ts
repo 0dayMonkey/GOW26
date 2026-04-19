@@ -15,6 +15,9 @@ import { ActionPanel } from './ui/action-panel';
 import { NotificationSystem } from './ui/notification';
 import { HoverCard3D } from './ui/hover-card-3d';
 import { PropertyPanel } from './ui/property-panel';
+import { GameEndScreen } from './ui/game-end-screen';
+import { AudioManager } from './audio/audio-manager';
+import { PostProcessingManager } from './post-processing/post-processing-manager';
 import { AssetLoader } from '@infrastructure/asset-loader';
 import { EventBus } from '@infrastructure/event-bus';
 import { Logger } from '@infrastructure/logger';
@@ -67,9 +70,15 @@ async function main(): Promise<void> {
   // Highlight
   const squareHighlight = new SquareHighlight(scene);
 
-  // Joueurs
+  // Joueurs — 1 humain + jusqu'à 3 IA (lisibles via ?ai=N dans l'URL, max 3)
   updateSplash(60, 'Joueurs...');
-  const players = [createHumanPlayer('Vous', 0), createAIPlayer('Bot Alice', 1)];
+  const params = new URLSearchParams(window.location.search);
+  const aiCount = Math.max(1, Math.min(3, parseInt(params.get('ai') ?? '1', 10) || 1));
+  const aiNames = ['Bot Alice', 'Bot Bob', 'Bot Claire'];
+  const players = [
+    createHumanPlayer('Vous', 0),
+    ...Array.from({ length: aiCount }, (_, i) => createAIPlayer(aiNames[i]!, i + 1)),
+  ];
 
   // Pions
   updateSplash(65, 'Pions...');
@@ -124,6 +133,26 @@ async function main(): Promise<void> {
   propertyPanel.setup();
   propertyPanel.connectEvents();
 
+  // Ecran de fin de partie
+  updateSplash(92, 'Ecran de fin...');
+  const endScreen = new GameEndScreen(eventBus, () => gameController.getState());
+  endScreen.setup();
+  endScreen.connectEvents();
+
+  // Audio procedural
+  updateSplash(93, 'Audio...');
+  const audio = new AudioManager(eventBus);
+  audio.setup();
+  audio.connectEvents();
+
+  // Post-processing (Bloom + ACES + FXAA + SSAO)
+  updateSplash(94, 'Post-processing...');
+  const cam = cameraController.getCamera();
+  if (cam) {
+    const postFx = new PostProcessingManager(scene);
+    postFx.setup(cam);
+  }
+
   // Highlight case
   eventBus.on('pawn:moved', (data) => {
     const pos = boardBuilder.getSquarePosition(data.to);
@@ -138,8 +167,8 @@ async function main(): Promise<void> {
   setupKeyboard(gameController);
   setupEventLog(eventBus);
 
-  (window as Record<string, unknown>).__game = gameController;
-  (window as Record<string, unknown>).__bus = eventBus;
+  (window as unknown as Record<string, unknown>).__game = gameController;
+  (window as unknown as Record<string, unknown>).__bus = eventBus;
 
   updateSplash(95, 'Lancement...');
   sceneManager.startRenderLoop();
@@ -151,7 +180,11 @@ async function main(): Promise<void> {
 
 function setupKeyboard(ctrl: GameController): void {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    // Ignorer si modificateur (Ctrl/Cmd/Alt) ou si focus sur un champ de saisie
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
     const p = ctrl.getCurrentPlayer();
     if (p.isAI) return;
     switch (e.key) {

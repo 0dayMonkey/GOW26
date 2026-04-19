@@ -91,18 +91,35 @@ describe('Building', () => {
       expect(owned.houses).toBe(1);
     });
 
-    it('construit jusqu\'à l\'hôtel', () => {
+    it('construit jusqu\'à l\'hôtel (construction équitable)', () => {
       giveMonopoly(p1.id, [1, 3]);
+      // Règle officielle : construction uniforme dans le groupe.
+      // On alterne entre les 2 propriétés pour rester équitable.
+      // 1 maison sur chaque (4 builds : 1,3,1,3 → [2,2])
+      // Puis 3 sur chaque (4 builds : 1,3,1,3 → [4,4])
+      // Puis hôtel sur chaque (2 builds : 1,3 → [5,5])
       for (let i = 0; i < 5; i++) {
-        const result = buildHouse(1, p1.id, state);
-        expect(result.success).toBe(true);
+        expect(buildHouse(1, p1.id, state).success).toBe(true);
+        expect(buildHouse(3, p1.id, state).success).toBe(true);
       }
-      const owned = state.properties.find((p) => p.squareIndex === 1)!;
-      expect(owned.houses).toBe(5); // hôtel
+      const o1 = state.properties.find((p) => p.squareIndex === 1)!;
+      const o3 = state.properties.find((p) => p.squareIndex === 3)!;
+      expect(o1.houses).toBe(5); // hôtel
+      expect(o3.houses).toBe(5); // hôtel
 
-      // 6ème construction échoue
+      // Nouvelle construction échoue (déjà hôtel)
       const result = buildHouse(1, p1.id, state);
       expect(result.success).toBe(false);
+    });
+
+    it('refuse une construction non équitable', () => {
+      giveMonopoly(p1.id, [1, 3]);
+      // Première maison sur 1 — OK (ex-æquo)
+      expect(buildHouse(1, p1.id, state).success).toBe(true);
+      // Deuxième sur 1 alors que 3 est à 0 — INTERDIT
+      const result = buildHouse(1, p1.id, state);
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.code).toBe('BUILD_UNEVEN');
     });
   });
 

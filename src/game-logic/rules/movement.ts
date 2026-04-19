@@ -95,5 +95,10 @@ export function movePlayerBack(player: Player, count: number): MoveResult {
 
   moveTo(player, to);
 
-  return { from, to, steps, passedGo: false, landedOnGoToJail: to === GO_TO_JAIL_SQUARE };
+  const landedOnGoToJail = to === GO_TO_JAIL_SQUARE;
+  if (landedOnGoToJail) {
+    sendToJail(player);
+  }
+
+  return { from, to, steps, passedGo: false, landedOnGoToJail };
 }

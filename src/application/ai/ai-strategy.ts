@@ -8,11 +8,10 @@
 import {
   type GameState,
   type PlayerId,
-  type OwnedProperty,
   SquareType,
 } from '@game-logic/types';
 import { getSquare } from '@game-logic/board/board';
-import { hasMonopoly, wouldCompleteGroup, hasGroupMember } from '@game-logic/board/property-group';
+import { wouldCompleteGroup, hasGroupMember } from '@game-logic/board/property-group';
 import { canBuild } from '@game-logic/rules/building';
 import { STATION_INDICES } from '@game-logic/constants';
 

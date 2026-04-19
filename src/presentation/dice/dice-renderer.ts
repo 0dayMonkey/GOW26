@@ -43,7 +43,8 @@ const STOP_V = 0.005;
 const STOP_W = 0.02;
 const DT = 1 / 60;
 const MAX_F = 420;
-const HIDE_MS = 2500;
+// Délai de sécurité pour masquer les dés si aucun événement pawn:animation:complete n'arrive
+const HIDE_MS_FALLBACK = 8000;
 
 // ─── Faces CreateBox BJS ─────────────────────────────────────────────
 // BJS CreateBox faceUV order :
@@ -109,6 +110,11 @@ export class DiceRenderer {
         logger.error('Erreur animation des:', err);
       });
     });
+
+    // Les dés restent visibles jusqu'à ce que le pion ait fini son animation
+    this.eventBus.on('pawn:animation:complete', () => {
+      this.hideDice();
+    });
   }
 
   async animateRoll(v1: number, v2: number, isDouble: boolean): Promise<void> {
@@ -126,10 +132,13 @@ export class DiceRenderer {
     this.eventBus.emit('dice:animation:complete', { values: [v1, v2], isDouble });
     logger.info(`Des: ${v1} + ${v2}${isDouble ? ' (DOUBLE)' : ''}`);
 
-    setTimeout(() => {
-      if (this.die1) this.die1.isVisible = false;
-      if (this.die2) this.die2.isVisible = false;
-    }, HIDE_MS);
+    // Fallback : si aucun pion ne bouge (ex. 3 doubles → prison direct), masquer après délai
+    setTimeout(() => this.hideDice(), HIDE_MS_FALLBACK);
+  }
+
+  private hideDice(): void {
+    if (this.die1) this.die1.isVisible = false;
+    if (this.die2) this.die2.isVisible = false;
   }
 
   isRolling(): boolean { return this.rolling; }

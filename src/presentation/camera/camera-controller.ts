@@ -86,6 +86,9 @@ export class CameraController {
   // Timer retour overview
   private returnTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Observer de pulse du ghost (nettoyé quand on affiche un autre ghost)
+  private ghostPulseObs: Observer<Scene> | null = null;
+
   constructor(scene: Scene, canvas: HTMLCanvasElement) {
     this.scene = scene;
     this.canvas = canvas;
@@ -138,7 +141,7 @@ export class CameraController {
     });
 
     // Quand c est le tour d un joueur → leger zoom sur sa position
-    eventBus.on('turn:started', (data) => {
+    eventBus.on('turn:started', () => {
       // On ne zoom pas immediatement — on attend le lancer de des
       this.scheduleReturnToOverview(500);
     });
@@ -157,7 +160,7 @@ export class CameraController {
     });
 
     // Achat effectue → flash ghost puis retour
-    eventBus.on('property:bought', (data) => {
+    eventBus.on('property:bought', () => {
       this.hideGhost();
       this.scheduleReturnToOverview(1500);
     });
@@ -369,15 +372,18 @@ export class CameraController {
    */
   showGhost(pos: SquareWorldPosition): void {
     if (!this.ghostMesh) return;
+    // Nettoyer un éventuel pulse précédent avant d'en démarrer un nouveau
+    this.stopGhostPulse();
+
     this.ghostMesh.position = new Vector3(pos.x, 0.3, pos.z);
     this.ghostMesh.rotation.y = pos.rotation;
     this.ghostMesh.isVisible = true;
 
     // Pulse animation via alpha cycling
     let phase = 0;
-    const pulseObs = this.scene.onBeforeRenderObservable.add(() => {
+    this.ghostPulseObs = this.scene.onBeforeRenderObservable.add(() => {
       if (!this.ghostMesh || !this.ghostMesh.isVisible || !this.ghostMat) {
-        this.scene.onBeforeRenderObservable.remove(pulseObs);
+        this.stopGhostPulse();
         return;
       }
       phase += 0.05;
@@ -391,6 +397,14 @@ export class CameraController {
   hideGhost(): void {
     if (this.ghostMesh) {
       this.ghostMesh.isVisible = false;
+    }
+    this.stopGhostPulse();
+  }
+
+  private stopGhostPulse(): void {
+    if (this.ghostPulseObs) {
+      this.scene.onBeforeRenderObservable.remove(this.ghostPulseObs);
+      this.ghostPulseObs = null;
     }
   }
 
